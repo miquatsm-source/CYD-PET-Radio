@@ -1,5 +1,7 @@
 # CYD PET Radio
 
+> **AI disclosure:** The text of this README was created with AI assistance.
+
 A touchscreen webradio for the ESP32-based CYD (Cheap Yellow Display), using
 the same basic board configuration as
 [CYD of the Dead](https://github.com/miquatsm-source/CYD-of-the-dead). A
@@ -8,6 +10,8 @@ fill the right side. Both panels are rendered into 8-bit sprite buffers before
 being transferred to the display to prevent partial-frame flicker. The lower
 left panel shows a pulsing eight-band FFT spectrum from bass to treble, based
 on the decoded audio samples.
+
+![CYD PET Radio running on the CYD display](./src/CYD-PET-Radio.png)
 
 ## Hardware configuration
 
