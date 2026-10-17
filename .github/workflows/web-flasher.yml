@@ -38,6 +38,7 @@ jobs:
           mkdir -p site/firmware
           cp web-flasher/index.html site/index.html
           cp web-flasher/manifest.json site/manifest.json
+          cp src/CYD-PET-Radio.png site/CYD-PET-Radio.png
           cp .pio/build/esp32dev-fast/bootloader.bin site/firmware/bootloader.bin
           cp .pio/build/esp32dev-fast/partitions.bin site/firmware/partitions.bin
           cp "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" site/firmware/boot_app0.bin
