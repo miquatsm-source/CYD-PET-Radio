@@ -37,6 +37,9 @@ volume slider. The top-right corner shows the detected genre and the current
 Europe/Berlin time and date. The clock synchronizes over the internet using
 NTP; until synchronization, it shows placeholder dashes.
 
+Choose one of five dark background colors in **MENU**. The selection is saved
+across restarts, and interface text remains white for readability.
+
 If playback is too quiet at 100%, open **MENU** and enable **AUDIO BOOST
 +6 dB**. This applies digital equalizer gain and is saved across restarts.
 Boost can cause distortion on loud audio; switch it off if playback clips.

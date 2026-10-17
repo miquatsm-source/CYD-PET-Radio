@@ -11,6 +11,7 @@
 
 #include "audio_spectrum.h"
 #include "bubble_texts.h"
+#include "colors.h"
 #include "fat_cat.h"
 #include "genres_animals.h"
 #include "default_playlist.h"
@@ -42,10 +43,17 @@ constexpr uint32_t MAX_DANCE_DURATION_MS = 16000;
 constexpr int8_t AUDIO_BOOST_DB = 6;
 constexpr char BERLIN_TIMEZONE[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 
-constexpr uint16_t BACKGROUND = 0x1082;
 constexpr uint16_t PANEL = 0x18E3;
 constexpr uint16_t PANEL_LIGHT = 0x2945;
 constexpr uint16_t ACCENT = 0x05BF;
+constexpr uint8_t THEME_COLOR_COUNT = 5;
+constexpr uint8_t DEFAULT_THEME_COLOR = 1;
+constexpr int16_t THEME_SWATCH_WIDTH = 36;
+constexpr int16_t THEME_SWATCH_HEIGHT = 16;
+constexpr int16_t THEME_SWATCH_GAP = 6;
+constexpr uint16_t THEME_COLORS[THEME_COLOR_COUNT] = {
+    COLOR_DARK_BLUE, COLOR_DARK_GREY, COLOR_DARK_GREEN, COLOR_DARK_RED,
+    COLOR_DARK_SLATE};
 constexpr uint16_t TEXT_MUTED = 0x9CF3;
 constexpr uint16_t SUCCESS = 0x4FE7;
 constexpr uint16_t ERROR_COLOUR = 0xF986;
@@ -99,6 +107,8 @@ uint8_t stationCount = 0;
 uint8_t selectedStation = 0;
 uint8_t stationListPage = 0;
 uint8_t volume = 10;
+uint8_t themeColorIndex = DEFAULT_THEME_COLOR;
+uint16_t backgroundColor = THEME_COLORS[DEFAULT_THEME_COLOR];
 uint8_t editorIndex = 0;
 uint8_t deleteIndex = 0;
 TouchCalibration touchCalibration{};
@@ -435,11 +445,38 @@ String keyboardRow(uint8_t row) {
   return letterRows[row];
 }
 
+uint16_t primaryTextColor() {
+  return TFT_WHITE;
+}
+
+int16_t themeSwatchX(uint8_t index) {
+  constexpr int16_t paletteWidth =
+      THEME_COLOR_COUNT * THEME_SWATCH_WIDTH +
+      (THEME_COLOR_COUNT - 1) * THEME_SWATCH_GAP;
+  return UI_LEFT + (UI_WIDTH - paletteWidth) / 2 +
+         index * (THEME_SWATCH_WIDTH + THEME_SWATCH_GAP);
+}
+
+void setThemeColor(uint8_t index) {
+  if (index >= THEME_COLOR_COUNT || index == themeColorIndex) {
+    return;
+  }
+
+  themeColorIndex = index;
+  backgroundColor = THEME_COLORS[index];
+  if (preferences.putUChar("theme", themeColorIndex) == 0) {
+    Serial.println("ERROR: could not save background color setting.");
+    statusMessage = "Could not save background color";
+  }
+  markUiDirty();
+}
+
 void drawText(const String &text, int16_t x, int16_t y, uint8_t font = 2,
               uint16_t colour = TFT_WHITE) {
   TFT_eSPI &display = *renderTarget;
   display.setTextDatum(TL_DATUM);
-  display.setTextColor(colour, BACKGROUND);
+  display.setTextColor(colour == TFT_WHITE ? primaryTextColor() : colour,
+                       backgroundColor);
   display.drawString(text, x, y, font);
 }
 
@@ -450,16 +487,17 @@ void drawButton(int16_t x, int16_t y, int16_t width, int16_t height,
   display.fillRoundRect(x, y, width, height, 7, fill);
   display.drawRoundRect(x, y, width, height, 7, 0x4208);
   display.setTextDatum(MC_DATUM);
-  display.setTextColor(colour, fill);
+  display.setTextColor(colour == TFT_WHITE ? primaryTextColor() : colour,
+                       fill);
   display.drawString(label, x + width / 2, y + height / 2, font);
 }
 
 void drawPanelHeader(const String &title) {
   TFT_eSPI &display = *renderTarget;
   display.fillRect(CAT_PANEL_WIDTH, 0, DISPLAY_WIDTH - CAT_PANEL_WIDTH,
-                   DISPLAY_HEIGHT, BACKGROUND);
+                   DISPLAY_HEIGHT, backgroundColor);
   display.setTextDatum(TL_DATUM);
-  display.setTextColor(TFT_CYAN, BACKGROUND);
+  display.setTextColor(TFT_CYAN, backgroundColor);
   display.drawString(title, UI_LEFT, 9, 2);
   display.drawFastHLine(UI_LEFT, 31, UI_WIDTH, 0x4208);
 }
@@ -488,13 +526,13 @@ void drawHome() {
              localTime.tm_min);
   }
   display.setTextDatum(TR_DATUM);
-  display.setTextColor(TFT_WHITE, BACKGROUND);
+  display.setTextColor(primaryTextColor(), backgroundColor);
   display.drawString(clockText, UI_LEFT + UI_WIDTH, 2, 1);
   const String genreText =
       currentGenreAnimal == nullptr
           ? "Genre: --"
           : String("Genre: ") + currentGenreAnimal->genre;
-  display.setTextColor(TFT_CYAN, BACKGROUND);
+  display.setTextColor(TFT_CYAN, backgroundColor);
   display.drawString(fittedText(genreText, 112, 1), UI_LEFT + UI_WIDTH, 14, 1);
 
   const bool connected = WiFi.status() == WL_CONNECTED;
@@ -505,7 +543,7 @@ void drawHome() {
     const uint32_t bitrateKbps =
         streamActive ? (radioAudio.getBitRate() + 500) / 1000 : 0;
     display.setTextDatum(TR_DATUM);
-    display.setTextColor(TEXT_MUTED, BACKGROUND);
+    display.setTextColor(TEXT_MUTED, backgroundColor);
     display.drawString(bitrateKbps == 0
                            ? "-- kbit/s"
                            : String(bitrateKbps) + " kbit/s",
@@ -514,7 +552,7 @@ void drawHome() {
 
   display.fillRoundRect(UI_LEFT, 53, UI_WIDTH, 45, 7, PANEL);
   display.setTextDatum(TL_DATUM);
-  display.setTextColor(TFT_WHITE, PANEL);
+  display.setTextColor(primaryTextColor(), PANEL);
   const String stationName =
       stationCount == 0 ? "No stations" : stations[selectedStation].name;
   display.drawString(fittedText(stationName, UI_WIDTH - 14), UI_LEFT + 7, 59,
@@ -534,7 +572,7 @@ void drawHome() {
   drawButton(UI_LEFT + 161, 105, 49, 36, ">|", PANEL_LIGHT);
 
   display.setTextDatum(TL_DATUM);
-  display.setTextColor(TFT_WHITE, BACKGROUND);
+  display.setTextColor(primaryTextColor(), backgroundColor);
   display.drawString("VOLUME", UI_LEFT, 151, 1);
   display.setTextDatum(TR_DATUM);
   display.drawString(String(volume * 100 / 21) + "%", UI_LEFT + UI_WIDTH,
@@ -552,39 +590,52 @@ void drawHome() {
 void drawSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("SETTINGS");
-  drawButton(UI_LEFT, 37, UI_WIDTH, 30, "WI-FI", PANEL_LIGHT);
-  drawButton(UI_LEFT, 72, UI_WIDTH, 30, "STATION LIST", PANEL_LIGHT);
-  drawButton(UI_LEFT, 107, UI_WIDTH, 30,
+  drawButton(UI_LEFT, 36, UI_WIDTH, 25, "WI-FI", PANEL_LIGHT);
+  drawButton(UI_LEFT, 63, UI_WIDTH, 25, "STATION LIST", PANEL_LIGHT);
+  drawButton(UI_LEFT, 90, UI_WIDTH, 25,
              String("AUDIO BOOST +6 dB: ") + (audioBoost ? "ON" : "OFF"),
              audioBoost ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 142, UI_WIDTH, 30,
+  drawButton(UI_LEFT, 117, UI_WIDTH, 25,
              String("SPECTRUM: ") + (audioSpectrumEnabled ? "ON" : "OFF"),
              audioSpectrumEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
   display.setTextDatum(TL_DATUM);
-  display.setTextColor(TEXT_MUTED, BACKGROUND);
-  display.drawString("VOLUME", UI_LEFT, 178, 1);
+  display.setTextColor(TEXT_MUTED, backgroundColor);
+  display.drawString("VOLUME", UI_LEFT, 148, 1);
   display.setTextDatum(TR_DATUM);
   display.drawString(String(volume * 100 / 21) + "%", UI_LEFT + UI_WIDTH,
-                     178, 1);
-  display.fillRoundRect(UI_LEFT, 195, UI_WIDTH, 8, 4, PANEL_LIGHT);
+                     148, 1);
+  display.fillRoundRect(UI_LEFT, 164, UI_WIDTH, 8, 4, PANEL_LIGHT);
   const int16_t sliderWidth =
       static_cast<int16_t>((UI_WIDTH - 4) * volume / 21);
-  display.fillRoundRect(UI_LEFT + 2, 197, sliderWidth, 4, 2, ACCENT);
-  display.fillCircle(UI_LEFT + 2 + sliderWidth, 199, 6, TFT_WHITE);
-  drawButton(UI_LEFT, 208, UI_WIDTH, 27, "BACK", PANEL_LIGHT, TFT_WHITE, 1);
+  display.fillRoundRect(UI_LEFT + 2, 166, sliderWidth, 4, 2, ACCENT);
+  display.fillCircle(UI_LEFT + 2 + sliderWidth, 168, 6, TFT_WHITE);
+  display.setTextDatum(TL_DATUM);
+  display.setTextColor(primaryTextColor(), backgroundColor);
+  display.drawString("BACKGROUND", UI_LEFT, 178, 1);
+  constexpr int16_t swatchY = 190;
+  for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
+    const int16_t swatchX = themeSwatchX(index);
+    display.fillRoundRect(swatchX, swatchY, THEME_SWATCH_WIDTH,
+                          THEME_SWATCH_HEIGHT, 3, THEME_COLORS[index]);
+    display.drawRoundRect(
+        swatchX - 1, swatchY - 1, THEME_SWATCH_WIDTH + 2,
+        THEME_SWATCH_HEIGHT + 2, 4,
+        index == themeColorIndex ? primaryTextColor() : 0x4208);
+  }
+  drawButton(UI_LEFT, 214, UI_WIDTH, 22, "BACK", PANEL_LIGHT, TFT_WHITE, 1);
 }
 
 void drawWifiSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("WI-FI SETTINGS");
   display.setTextDatum(TL_DATUM);
-  display.setTextColor(TEXT_MUTED, BACKGROUND);
+  display.setTextColor(TEXT_MUTED, backgroundColor);
   display.drawString("NETWORK NAME (SSID)", UI_LEFT, 40, 1);
   drawButton(UI_LEFT, 54, UI_WIDTH, 34,
              fittedText(wifiSsid.isEmpty() ? "(Enter SSID)" : wifiSsid,
                         UI_WIDTH - 16, 1),
              PANEL);
-  display.setTextColor(TEXT_MUTED, BACKGROUND);
+  display.setTextColor(TEXT_MUTED, backgroundColor);
   display.drawString("PASSWORD", UI_LEFT, 97, 1);
   String passwordPreview = passwordForDisplay(wifiPassword);
   if (wifiPassword.isEmpty()) {
@@ -623,7 +674,7 @@ void drawStations() {
     display.fillRoundRect(UI_LEFT + 9, 83, UI_WIDTH - 18, 83, 8, PANEL_LIGHT);
     display.drawRoundRect(UI_LEFT + 9, 83, UI_WIDTH - 18, 83, 8, TFT_CYAN);
     display.setTextDatum(MC_DATUM);
-    display.setTextColor(TFT_WHITE, PANEL_LIGHT);
+    display.setTextColor(primaryTextColor(), PANEL_LIGHT);
     display.drawString("Delete station?", 208, 101, 2);
     display.drawString(
         fittedText(stations[deleteIndex].name, 170, 1), 208, 124, 1);
@@ -639,7 +690,7 @@ void drawStations() {
     const uint16_t fill = i == selectedStation ? 0x2147 : PANEL;
     display.fillRoundRect(UI_LEFT, rowY, UI_WIDTH, 24, 5, fill);
     display.setTextDatum(ML_DATUM);
-    display.setTextColor(TFT_WHITE, fill);
+    display.setTextColor(primaryTextColor(), fill);
     display.drawString(fittedText(stations[i].name, 130, 1), UI_LEFT + 7,
                        rowY + 12, 1);
     display.setTextDatum(MC_DATUM);
@@ -650,7 +701,7 @@ void drawStations() {
   drawButton(UI_LEFT, 204, 28, 25, "<", PANEL_LIGHT, TFT_WHITE, 1);
   drawButton(UI_LEFT + 30, 204, 28, 25, ">", PANEL_LIGHT, TFT_WHITE, 1);
   display.setTextDatum(MC_DATUM);
-  display.setTextColor(TFT_WHITE, BACKGROUND);
+  display.setTextColor(primaryTextColor(), backgroundColor);
   display.drawString(String(stationListPage + 1) + "/" + String(pageCount),
                      UI_LEFT + 75, 216, 1);
   drawButton(UI_LEFT + 94, 204, 62, 25, "+ STATION", ACCENT, TFT_WHITE, 1);
@@ -662,11 +713,11 @@ void drawStationEditor() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader(stationEditorIsNew ? "NEW STATION" : "EDIT STATION");
   display.setTextDatum(TL_DATUM);
-  display.setTextColor(TEXT_MUTED, BACKGROUND);
+  display.setTextColor(TEXT_MUTED, backgroundColor);
   display.drawString("NAME", UI_LEFT, 40, 1);
   drawButton(UI_LEFT, 54, UI_WIDTH, 32,
              fittedText(editName, UI_WIDTH - 14, 1), PANEL);
-  display.setTextColor(TEXT_MUTED, BACKGROUND);
+  display.setTextColor(TEXT_MUTED, backgroundColor);
   display.drawString("STREAM-URL", UI_LEFT, 94, 1);
   drawButton(UI_LEFT, 108, UI_WIDTH, 32,
              fittedText(editUrl, UI_WIDTH - 14, 1), PANEL);
@@ -735,7 +786,7 @@ void drawKeyboard() {
 
 void renderScreen() {
   renderTarget = &screenFrameBuffer;
-  screenFrameBuffer.fillSprite(BACKGROUND);
+  screenFrameBuffer.fillSprite(backgroundColor);
   screenFrameBuffer.setViewport(CAT_PANEL_WIDTH, 0,
                                 DISPLAY_WIDTH - CAT_PANEL_WIDTH,
                                 DISPLAY_HEIGHT, false);
@@ -768,9 +819,9 @@ void renderScreen() {
 void drawCalibrationTarget(uint8_t index) {
   const int16_t targetX[] = {20, DISPLAY_WIDTH - 21, 20, DISPLAY_WIDTH - 21};
   const int16_t targetY[] = {20, 20, DISPLAY_HEIGHT - 21, DISPLAY_HEIGHT - 21};
-  display.fillScreen(BACKGROUND);
+  display.fillScreen(backgroundColor);
   display.setTextDatum(TL_DATUM);
-  display.setTextColor(TFT_WHITE, BACKGROUND);
+  display.setTextColor(primaryTextColor(), backgroundColor);
   display.drawString("Touch calibration", 24, 72, 2);
   display.drawString("Touch target " + String(index + 1) + "/4", 24, 101,
                      2);
@@ -1481,19 +1532,27 @@ void handleTouch(int16_t x, int16_t y) {
       handleHomeTouch(x, y);
       break;
     case Screen::Settings:
-      if (pointInRect(x, y, UI_LEFT, 37, UI_WIDTH, 30)) {
+      if (pointInRect(x, y, UI_LEFT, 36, UI_WIDTH, 25)) {
         currentScreen = Screen::Wifi;
-      } else if (pointInRect(x, y, UI_LEFT, 72, UI_WIDTH, 30)) {
+      } else if (pointInRect(x, y, UI_LEFT, 63, UI_WIDTH, 25)) {
         currentScreen = Screen::Stations;
         deleteConfirmation = false;
-      } else if (pointInRect(x, y, UI_LEFT, 107, UI_WIDTH, 30)) {
+      } else if (pointInRect(x, y, UI_LEFT, 90, UI_WIDTH, 25)) {
         setAudioBoost(!audioBoost);
-      } else if (pointInRect(x, y, UI_LEFT, 142, UI_WIDTH, 30)) {
+      } else if (pointInRect(x, y, UI_LEFT, 117, UI_WIDTH, 25)) {
         setAudioSpectrum(!audioSpectrumEnabled);
-      } else if (pointInRect(x, y, UI_LEFT, 208, UI_WIDTH, 27)) {
-        currentScreen = Screen::Home;
-      } else if (pointInRect(x, y, UI_LEFT, 192, UI_WIDTH, 16)) {
+      } else if (pointInRect(x, y, UI_LEFT, 189, UI_WIDTH, 18)) {
+        for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
+          if (pointInRect(x, y, themeSwatchX(index) - 1, 189,
+                          THEME_SWATCH_WIDTH + 2, THEME_SWATCH_HEIGHT + 2)) {
+            setThemeColor(index);
+            break;
+          }
+        }
+      } else if (pointInRect(x, y, UI_LEFT, 160, UI_WIDTH, 17)) {
         adjustVolumeFromTouch(x);
+      } else if (pointInRect(x, y, UI_LEFT, 214, UI_WIDTH, 22)) {
+        currentScreen = Screen::Home;
       }
       markUiDirty();
       break;
@@ -1597,6 +1656,11 @@ void setup() {
   volume = min<uint8_t>(preferences.getUChar("volume", 10), 21);
   audioBoost = preferences.getBool("boost", false);
   audioSpectrumEnabled = preferences.getBool("spectrum", true);
+  themeColorIndex = min<uint8_t>(
+      preferences.getUChar("theme", DEFAULT_THEME_COLOR),
+      THEME_COLOR_COUNT - 1);
+  backgroundColor = THEME_COLORS[themeColorIndex];
+  display.fillScreen(backgroundColor);
   setAudioSpectrumEnabled(audioSpectrumEnabled);
   selectedStation = preferences.getUChar("selected", 0);
   loadStations();

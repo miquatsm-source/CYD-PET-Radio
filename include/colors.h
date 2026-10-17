@@ -1,0 +1,10 @@
+#ifndef COLORS_H
+#define COLORS_H
+
+#define COLOR_DARK_BLUE 0x0986
+#define COLOR_DARK_GREY 0x18C3
+#define COLOR_DARK_GREEN 0x0204
+#define COLOR_DARK_RED 0x4800
+#define COLOR_DARK_SLATE 0x2124
+
+#endif
