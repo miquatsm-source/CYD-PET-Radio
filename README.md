@@ -40,6 +40,10 @@ NTP; until synchronization, it shows placeholder dashes.
 Choose one of five dark background colors in **MENU**. The selection is saved
 across restarts, and interface text remains white for readability.
 
+Enable optional dynamic audio compression in **MENU** to boost quieter audio
+while controlling loud peaks. This can make streaming volume more consistent,
+but does not increase the CYD's physical amplifier output.
+
 If playback is too quiet at 100%, open **MENU** and enable **AUDIO BOOST
 +6 dB**. This applies digital equalizer gain and is saved across restarts.
 Boost can cause distortion on loud audio; switch it off if playback clips.

@@ -1,5 +1,6 @@
 #include <math.h>
 
+#include "audio_compressor.h"
 #include "audio_spectrum.h"
 #include "fat_cat.h"
 
@@ -134,6 +135,7 @@ void setAudioSpectrumEnabled(bool enabled) {
 
 void audio_process_i2s(uint32_t *sample, bool *continueI2S) {
   *continueI2S = true;
+  processAudioCompressor(sample);
   if (!captureEnabled) {
     return;
   }

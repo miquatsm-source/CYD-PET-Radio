@@ -10,6 +10,7 @@
 #include <esp_system.h>
 
 #include "audio_spectrum.h"
+#include "audio_compressor.h"
 #include "bubble_texts.h"
 #include "colors.h"
 #include "fat_cat.h"
@@ -135,6 +136,7 @@ bool deleteConfirmation = false;
 bool stationEditorIsNew = false;
 bool audioBoost = false;
 bool audioSpectrumEnabled = true;
+bool audioCompressorEnabled = false;
 bool keyboardUppercase = false;
 uint8_t keyboardPage = 0;
 bool uiDirty = true;
@@ -592,27 +594,30 @@ void drawSettings() {
   drawPanelHeader("SETTINGS");
   drawButton(UI_LEFT, 36, UI_WIDTH, 25, "WI-FI", PANEL_LIGHT);
   drawButton(UI_LEFT, 63, UI_WIDTH, 25, "STATION LIST", PANEL_LIGHT);
-  drawButton(UI_LEFT, 90, UI_WIDTH, 25,
-             String("AUDIO BOOST +6 dB: ") + (audioBoost ? "ON" : "OFF"),
+  drawButton(UI_LEFT, 89, 102, 24,
+             String("BOOST +6: ") + (audioBoost ? "ON" : "OFF"),
              audioBoost ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 117, UI_WIDTH, 25,
+  drawButton(UI_LEFT + 108, 89, 102, 24,
              String("SPECTRUM: ") + (audioSpectrumEnabled ? "ON" : "OFF"),
              audioSpectrumEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT, 115, UI_WIDTH, 24,
+             String("COMPRESSION: ") + (audioCompressorEnabled ? "ON" : "OFF"),
+             audioCompressorEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
-  display.drawString("VOLUME", UI_LEFT, 148, 1);
+  display.drawString("VOLUME", UI_LEFT, 147, 1);
   display.setTextDatum(TR_DATUM);
   display.drawString(String(volume * 100 / 21) + "%", UI_LEFT + UI_WIDTH,
-                     148, 1);
-  display.fillRoundRect(UI_LEFT, 164, UI_WIDTH, 8, 4, PANEL_LIGHT);
+                     147, 1);
+  display.fillRoundRect(UI_LEFT, 163, UI_WIDTH, 8, 4, PANEL_LIGHT);
   const int16_t sliderWidth =
       static_cast<int16_t>((UI_WIDTH - 4) * volume / 21);
-  display.fillRoundRect(UI_LEFT + 2, 166, sliderWidth, 4, 2, ACCENT);
-  display.fillCircle(UI_LEFT + 2 + sliderWidth, 168, 6, TFT_WHITE);
+  display.fillRoundRect(UI_LEFT + 2, 165, sliderWidth, 4, 2, ACCENT);
+  display.fillCircle(UI_LEFT + 2 + sliderWidth, 167, 6, TFT_WHITE);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(primaryTextColor(), backgroundColor);
-  display.drawString("BACKGROUND", UI_LEFT, 178, 1);
-  constexpr int16_t swatchY = 190;
+  display.drawString("BACKGROUND", UI_LEFT, 177, 1);
+  constexpr int16_t swatchY = 188;
   for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
     const int16_t swatchX = themeSwatchX(index);
     display.fillRoundRect(swatchX, swatchY, THEME_SWATCH_WIDTH,
@@ -622,7 +627,7 @@ void drawSettings() {
         THEME_SWATCH_HEIGHT + 2, 4,
         index == themeColorIndex ? primaryTextColor() : 0x4208);
   }
-  drawButton(UI_LEFT, 214, UI_WIDTH, 22, "BACK", PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT, 213, UI_WIDTH, 23, "BACK", PANEL_LIGHT, TFT_WHITE, 1);
 }
 
 void drawWifiSettings() {
@@ -1077,6 +1082,18 @@ void setAudioSpectrum(bool enabled) {
     return;
   }
   markUiDirty();
+}
+
+void setAudioCompressor(bool enabled) {
+  audioCompressorEnabled = enabled;
+  setAudioCompressorEnabled(enabled);
+  if (preferences.putBool("compressor", audioCompressorEnabled) == 0) {
+    Serial.println("ERROR: could not save audio compression setting.");
+    setStatus("Could not save compression setting");
+    return;
+  }
+  setStatus(audioCompressorEnabled ? "Audio compression enabled"
+                                   : "Audio compression disabled");
 }
 
 void startStream() {
@@ -1537,21 +1554,23 @@ void handleTouch(int16_t x, int16_t y) {
       } else if (pointInRect(x, y, UI_LEFT, 63, UI_WIDTH, 25)) {
         currentScreen = Screen::Stations;
         deleteConfirmation = false;
-      } else if (pointInRect(x, y, UI_LEFT, 90, UI_WIDTH, 25)) {
+      } else if (pointInRect(x, y, UI_LEFT, 89, 102, 24)) {
         setAudioBoost(!audioBoost);
-      } else if (pointInRect(x, y, UI_LEFT, 117, UI_WIDTH, 25)) {
+      } else if (pointInRect(x, y, UI_LEFT + 108, 89, 102, 24)) {
         setAudioSpectrum(!audioSpectrumEnabled);
-      } else if (pointInRect(x, y, UI_LEFT, 189, UI_WIDTH, 18)) {
+      } else if (pointInRect(x, y, UI_LEFT, 115, UI_WIDTH, 24)) {
+        setAudioCompressor(!audioCompressorEnabled);
+      } else if (pointInRect(x, y, UI_LEFT, 187, UI_WIDTH, 19)) {
         for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
-          if (pointInRect(x, y, themeSwatchX(index) - 1, 189,
+          if (pointInRect(x, y, themeSwatchX(index) - 1, 187,
                           THEME_SWATCH_WIDTH + 2, THEME_SWATCH_HEIGHT + 2)) {
             setThemeColor(index);
             break;
           }
         }
-      } else if (pointInRect(x, y, UI_LEFT, 160, UI_WIDTH, 17)) {
+      } else if (pointInRect(x, y, UI_LEFT, 159, UI_WIDTH, 18)) {
         adjustVolumeFromTouch(x);
-      } else if (pointInRect(x, y, UI_LEFT, 214, UI_WIDTH, 22)) {
+      } else if (pointInRect(x, y, UI_LEFT, 213, UI_WIDTH, 23)) {
         currentScreen = Screen::Home;
       }
       markUiDirty();
@@ -1656,6 +1675,8 @@ void setup() {
   volume = min<uint8_t>(preferences.getUChar("volume", 10), 21);
   audioBoost = preferences.getBool("boost", false);
   audioSpectrumEnabled = preferences.getBool("spectrum", true);
+  audioCompressorEnabled = preferences.getBool("compressor", false);
+  setAudioCompressorEnabled(audioCompressorEnabled);
   themeColorIndex = min<uint8_t>(
       preferences.getUChar("theme", DEFAULT_THEME_COLOR),
       THEME_COLOR_COUNT - 1);
