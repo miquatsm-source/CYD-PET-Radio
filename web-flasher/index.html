@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="CYD PET Radio direkt im Browser auf ein ESP32-CYD installieren.">
+    <title>CYD PET Radio installieren</title>
+    <script
+      type="module"
+      src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
+    ></script>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, sans-serif;
+        background: #111827;
+        color: #f9fafb;
+      }
+
+      body {
+        box-sizing: border-box;
+        display: grid;
+        min-height: 100vh;
+        margin: 0;
+        padding: 2rem;
+        place-items: center;
+      }
+
+      main {
+        width: min(100%, 38rem);
+        padding: 2rem;
+        border: 1px solid #4b5563;
+        border-radius: 1rem;
+        background: #1f2937;
+        box-shadow: 0 1rem 3rem #0006;
+      }
+
+      h1 {
+        margin-top: 0;
+        color: #67e8f9;
+      }
+
+      p,
+      li {
+        line-height: 1.6;
+      }
+
+      .install {
+        margin: 1.5rem 0;
+        text-align: center;
+      }
+
+      a {
+        color: #7dd3fc;
+      }
+
+      .warning {
+        padding: 1rem;
+        border-left: 4px solid #fbbf24;
+        background: #111827;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>CYD PET Radio</h1>
+      <p>Installiere das Webradio mit tanzender Katze direkt aus dem Browser auf deinem ESP32 CYD.</p>
+      <ol>
+        <li>Verwende Chrome, Edge oder einen anderen Desktop-Browser mit Web Serial.</li>
+        <li>Verbinde das CYD mit einem USB-Datenkabel.</li>
+        <li>Klicke auf „Installieren“, wähle den seriellen Anschluss deines Boards und bestätige die Verbindung.</li>
+      </ol>
+      <p class="install">
+        <esp-web-install-button manifest="./manifest.json"></esp-web-install-button>
+      </p>
+      <p class="warning">
+        Bei einer Neuinstallation kann der Flasher anbieten, den Speicher zu
+        löschen. Dabei werden WLAN-Zugangsdaten, Senderliste, Lautstärke und
+        Touchscreen-Kalibrierung gelöscht. Notiere deine WLAN-Zugangsdaten,
+        bevor du den Speicher löschst.
+      </p>
+      <p>
+        Nach dem Installieren WLAN und Sender direkt im Radio einrichten.
+        Hinweise zur CYD-Hardware und Einrichtung findest du im
+        <a href="https://github.com/miquatsm-source/CYD-PET-Radio">Projekt-Repository</a>.
+      </p>
+    </main>
+  </body>
+</html>
