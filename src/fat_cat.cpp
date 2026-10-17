@@ -11,72 +11,96 @@ constexpr uint16_t EYE_COLOUR = 0x07E0;
 
 }  // namespace
 
-void drawFatCat(TFT_eSprite &frameBuffer, uint32_t now) {
-  const uint8_t pose = (now / FAT_CAT_FRAME_INTERVAL_MS) % 4;
-  const int16_t bounce[] = {0, -3, -5, -2};
-  const int16_t armLift[] = {-8, -16, -20, -12};
-  const int16_t legKick[] = {-4, 4, 8, 0};
-  const int16_t bob = bounce[pose];
-  const int16_t headX = 48;
-  const int16_t headY = 78 + bob;
-  const int16_t bodyY = 126 + bob;
+void drawFatCat(TFT_eSprite &frameBuffer, uint32_t now, const char *petName,
+                PetDance dance, PetOutfit outfit) {
+  const uint8_t pose = (now / FAT_CAT_FRAME_INTERVAL_MS) % 12;
+  static const int8_t bounce[] = {0, -2, -5, -8, -10, -8,
+                                  -5, -2, 0, 2, 1, 0};
+  static const int8_t sway[] = {0, 1, 2, 3, 2, 1, 0, -1, -2, -3, -2, -1};
+  static const int8_t hops[] = {0, -4, -8, -12, -8, -4,
+                                0, -3, -7, -11, -7, -3};
+  static const int8_t arms[] = {-7, -12, -17, -21, -17, -12,
+                                -7, -12, -17, -21, -17, -12};
+  static const int8_t kicks[] = {-4, -2, 2, 6, 2, -2, -4, 2, 6, 2, -2, -4};
+  const int16_t bob = dance == PetDance::Sway
+                          ? sway[pose]
+                          : dance == PetDance::Hop ? hops[pose] : bounce[pose];
+  const int16_t step = dance == PetDance::Bounce
+                           ? kicks[pose]
+                           : dance == PetDance::Sway
+                                 ? sway[pose] * 2
+                                 : kicks[(pose + 3) % 12];
+  const int16_t armLift =
+      dance == PetDance::Sway ? arms[(pose + 3) % 12] : arms[pose];
+  const int16_t headX = 48 + (dance == PetDance::Sway ? sway[pose] : 0);
+  const int16_t headY = 108 + bob;
+  const int16_t bodyY = 132 + bob;
 
-  frameBuffer.fillScreen(PANEL_COLOUR);
+  frameBuffer.fillRect(0, 0, FAT_CAT_PANEL_WIDTH, 195, PANEL_COLOUR);
   frameBuffer.drawFastHLine(0, 193, FAT_CAT_PANEL_WIDTH, 0x3186);
   frameBuffer.fillCircle(15, 44, 1, TFT_YELLOW);
   frameBuffer.fillCircle(79, 30, 1, TFT_CYAN);
   frameBuffer.fillCircle(77, 105, 1, TFT_YELLOW);
   frameBuffer.setTextDatum(MC_DATUM);
   frameBuffer.setTextColor(TFT_CYAN, PANEL_COLOUR);
-  frameBuffer.drawString("PET", 48, 18, 2);
+  frameBuffer.drawString(petName, 48, 18, 2);
   frameBuffer.setTextColor(0xAD55, PANEL_COLOUR);
   frameBuffer.drawString("RADIO", 48, 35, 1);
 
-  frameBuffer.drawLine(70, bodyY + 23, 83, bodyY + 16 + bob / 2, FUR_SHADOW);
-  frameBuffer.drawLine(83, bodyY + 16 + bob / 2, 87, bodyY + 6 + bob / 2,
+  frameBuffer.drawLine(68, bodyY + 24, 81, bodyY + 17 + bob / 2, FUR_SHADOW);
+  frameBuffer.drawLine(81, bodyY + 17 + bob / 2, 86, bodyY + 10 + bob / 2,
                    FUR_SHADOW);
-  frameBuffer.fillCircle(87, bodyY + 6 + bob / 2, 4, FUR_COLOUR);
+  frameBuffer.fillCircle(86, bodyY + 10 + bob / 2, 3, FUR_COLOUR);
 
-  frameBuffer.fillTriangle(headX - 20, headY - 14, headX - 23, headY - 36,
-                       headX - 7, headY - 25, FUR_SHADOW);
-  frameBuffer.fillTriangle(headX + 20, headY - 14, headX + 23, headY - 36,
-                       headX + 7, headY - 25, FUR_SHADOW);
-  frameBuffer.fillTriangle(headX - 19, headY - 19, headX - 20, headY - 31,
-                       headX - 11, headY - 24, INNER_EAR);
-  frameBuffer.fillTriangle(headX + 19, headY - 19, headX + 20, headY - 31,
-                       headX + 11, headY - 24, INNER_EAR);
-  frameBuffer.fillRoundRect(15, bodyY, 66, 64, 27, FUR_SHADOW);
-  frameBuffer.fillRoundRect(18, bodyY - 2, 60, 60, 25, FUR_COLOUR);
-  frameBuffer.fillEllipse(48, bodyY + 31, 20, 23, BELLY_COLOUR);
+  frameBuffer.fillTriangle(headX - 14, headY - 11, headX - 17, headY - 27,
+                           headX - 5, headY - 19, FUR_SHADOW);
+  frameBuffer.fillTriangle(headX + 14, headY - 11, headX + 17, headY - 27,
+                           headX + 5, headY - 19, FUR_SHADOW);
+  frameBuffer.fillTriangle(headX - 13, headY - 15, headX - 14, headY - 23,
+                           headX - 8, headY - 18, INNER_EAR);
+  frameBuffer.fillTriangle(headX + 13, headY - 15, headX + 14, headY - 23,
+                           headX + 8, headY - 18, INNER_EAR);
+  frameBuffer.fillRoundRect(25, bodyY, 46, 47, 20, FUR_SHADOW);
+  frameBuffer.fillRoundRect(28, bodyY - 2, 40, 44, 18, FUR_COLOUR);
+  frameBuffer.fillEllipse(48, bodyY + 23, 14, 17, BELLY_COLOUR);
 
-  frameBuffer.drawLine(27, bodyY + 11, 15, bodyY + armLift[pose], FUR_SHADOW);
-  frameBuffer.drawLine(69, bodyY + 11, 81, bodyY + armLift[(pose + 2) % 4],
-                   FUR_SHADOW);
-  frameBuffer.fillCircle(15, bodyY + armLift[pose], 5, BELLY_COLOUR);
-  frameBuffer.fillCircle(81, bodyY + armLift[(pose + 2) % 4], 5, BELLY_COLOUR);
+  frameBuffer.drawLine(32, bodyY + 10, 24, bodyY + armLift, FUR_SHADOW);
+  frameBuffer.drawLine(64, bodyY + 10, 72,
+                       bodyY + arms[(pose + 6) % 12], FUR_SHADOW);
+  frameBuffer.fillCircle(24, bodyY + armLift, 4, BELLY_COLOUR);
+  frameBuffer.fillCircle(72, bodyY + arms[(pose + 6) % 12], 4, BELLY_COLOUR);
 
-  frameBuffer.fillCircle(headX, headY, 26, FUR_COLOUR);
-  frameBuffer.fillCircle(38, headY + 1, 3, EYE_COLOUR);
-  frameBuffer.fillCircle(58, headY + 1, 3, EYE_COLOUR);
-  frameBuffer.fillCircle(38, headY + 1, 1, TFT_BLACK);
-  frameBuffer.fillCircle(58, headY + 1, 1, TFT_BLACK);
-  frameBuffer.fillTriangle(45, headY + 9, 51, headY + 9, 48, headY + 13,
+  frameBuffer.fillCircle(headX, headY, 20, FUR_COLOUR);
+  frameBuffer.fillCircle(41, headY + 1, 2, EYE_COLOUR);
+  frameBuffer.fillCircle(55, headY + 1, 2, EYE_COLOUR);
+  frameBuffer.fillCircle(41, headY + 1, 1, TFT_BLACK);
+  frameBuffer.fillCircle(55, headY + 1, 1, TFT_BLACK);
+  frameBuffer.fillTriangle(45, headY + 7, 51, headY + 7, 48, headY + 10,
                        INNER_EAR);
-  frameBuffer.drawLine(48, headY + 13, 44, headY + 16, TFT_BLACK);
-  frameBuffer.drawLine(48, headY + 13, 52, headY + 16, TFT_BLACK);
-  frameBuffer.drawLine(31, headY + 11, 21, headY + 9, BELLY_COLOUR);
-  frameBuffer.drawLine(31, headY + 15, 21, headY + 16, BELLY_COLOUR);
-  frameBuffer.drawLine(65, headY + 11, 75, headY + 9, BELLY_COLOUR);
-  frameBuffer.drawLine(65, headY + 15, 75, headY + 16, BELLY_COLOUR);
+  frameBuffer.drawLine(48, headY + 10, 45, headY + 13, TFT_BLACK);
+  frameBuffer.drawLine(48, headY + 10, 51, headY + 13, TFT_BLACK);
+  frameBuffer.drawLine(35, headY + 9, 28, headY + 8, BELLY_COLOUR);
+  frameBuffer.drawLine(35, headY + 12, 28, headY + 13, BELLY_COLOUR);
+  frameBuffer.drawLine(61, headY + 9, 68, headY + 8, BELLY_COLOUR);
+  frameBuffer.drawLine(61, headY + 12, 68, headY + 13, BELLY_COLOUR);
 
-  frameBuffer.drawLine(34, bodyY + 55, 30 + legKick[pose], 181 + bob,
+  frameBuffer.drawLine(37, bodyY + 40, 34 + step, 181 + bob,
                        FUR_SHADOW);
-  frameBuffer.drawLine(61, bodyY + 55, 66 - legKick[pose], 181 - bob,
+  frameBuffer.drawLine(59, bodyY + 40, 62 - step, 181 - bob,
                        FUR_SHADOW);
-  frameBuffer.fillRoundRect(22 + legKick[pose], 178 + bob, 17, 8, 4,
+  frameBuffer.fillRoundRect(28 + step, 178 + bob, 13, 7, 3,
                             BELLY_COLOUR);
-  frameBuffer.fillRoundRect(59 - legKick[pose], 178 - bob, 17, 8, 4,
+  frameBuffer.fillRoundRect(55 - step, 178 - bob, 13, 7, 3,
                             BELLY_COLOUR);
+
+  drawPetClothing(frameBuffer, 5, outfit, bob);
+  if (dance == PetDance::Sway) {
+    frameBuffer.drawString("♪", 15 + sway[pose], 90, 2);
+    frameBuffer.drawString("♪", 75 - sway[pose], 115, 2);
+  } else if (dance == PetDance::Hop && pose % 3 == 0) {
+    frameBuffer.drawString("*", 12, 158, 2);
+    frameBuffer.drawString("*", 80, 151, 2);
+  }
 
   frameBuffer.setTextColor(TFT_YELLOW, PANEL_COLOUR);
   frameBuffer.drawString("*", 13, 73 + bob, 2);

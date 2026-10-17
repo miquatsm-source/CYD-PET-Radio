@@ -1,12 +1,19 @@
 #include <Arduino.h>
+#include <cstring>
 #include <Preferences.h>
 #include <SPI.h>
 #include <TFT_eSPI.h>
+#include <time.h>
 #include <XPT2046_Touchscreen.h>
 #include <WiFi.h>
 #include <Audio.h>
+#include <esp_system.h>
 
+#include "audio_spectrum.h"
+#include "bubble_texts.h"
 #include "fat_cat.h"
+#include "genres_animals.h"
+#include "default_playlist.h"
 
 namespace {
 
@@ -15,12 +22,25 @@ constexpr int16_t DISPLAY_HEIGHT = 240;
 constexpr int16_t CAT_PANEL_WIDTH = FAT_CAT_PANEL_WIDTH;
 constexpr int16_t UI_LEFT = 103;
 constexpr int16_t UI_WIDTH = 210;
-constexpr uint8_t MAX_STATIONS = 6;
-constexpr uint8_t STATION_NAME_SIZE = 25;
+constexpr uint8_t MAX_STATIONS = 15;
+constexpr uint8_t STATIONS_PER_PAGE = 5;
+constexpr uint8_t STATION_NAME_SIZE = 32;
 constexpr uint8_t STATION_URL_SIZE = 192;
 constexpr uint16_t CAT_FRAME_INTERVAL_MS = FAT_CAT_FRAME_INTERVAL_MS;
 constexpr uint16_t TOUCH_DEBOUNCE_MS = 180;
 constexpr uint32_t WIFI_TIMEOUT_MS = 25000;
+constexpr uint32_t STREAM_RETRY_DELAY_MS = 3000;
+constexpr uint16_t CLOCK_UPDATE_INTERVAL_MS = 60000;
+constexpr uint16_t BITRATE_UPDATE_INTERVAL_MS = 1000;
+constexpr uint32_t BUBBLE_VISIBLE_MS = 2000;
+constexpr uint32_t MIN_BUBBLE_INTERVAL_MS = 5000;
+constexpr uint32_t MAX_BUBBLE_INTERVAL_MS = 15000;
+constexpr uint32_t RANDOM_PET_INTERVAL_MS = 30000;
+constexpr uint32_t PET_TRANSITION_DURATION_MS = 900;
+constexpr uint32_t MIN_DANCE_DURATION_MS = 8000;
+constexpr uint32_t MAX_DANCE_DURATION_MS = 16000;
+constexpr int8_t AUDIO_BOOST_DB = 6;
+constexpr char BERLIN_TIMEZONE[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 
 constexpr uint16_t BACKGROUND = 0x1082;
 constexpr uint16_t PANEL = 0x18E3;
@@ -58,8 +78,16 @@ enum class KeyboardTarget : uint8_t {
   StationUrl
 };
 
+enum class PetTransition : uint8_t {
+  Entering,
+  Idle,
+  Exiting
+};
+
 TFT_eSPI display;
-TFT_eSprite catFrameBuffer(&display);
+// Composite the UI and cat before pushing one complete frame to the TFT.
+TFT_eSprite screenFrameBuffer(&display);
+TFT_eSPI *renderTarget = &display;
 SPIClass touchSPI(HSPI);
 XPT2046_Touchscreen touch(33, 36);
 Preferences preferences;
@@ -69,6 +97,7 @@ Audio radioAudio(true, I2S_DAC_CHANNEL_LEFT_EN);
 Station stations[MAX_STATIONS]{};
 uint8_t stationCount = 0;
 uint8_t selectedStation = 0;
+uint8_t stationListPage = 0;
 uint8_t volume = 10;
 uint8_t editorIndex = 0;
 uint8_t deleteIndex = 0;
@@ -84,15 +113,18 @@ String editUrl;
 String keyboardValue;
 String streamTitle;
 String streamStation;
-String statusMessage = "Wi-Fi einrichten";
+String statusMessage = "Set up Wi-Fi";
 
 bool touchHeld = false;
 bool wifiConnecting = false;
 bool playWhenConnected = false;
 bool streamActive = false;
+bool streamRestartPending = false;
 bool showWifiPassword = false;
 bool deleteConfirmation = false;
 bool stationEditorIsNew = false;
+bool audioBoost = false;
+bool audioSpectrumEnabled = true;
 bool keyboardUppercase = false;
 uint8_t keyboardPage = 0;
 bool uiDirty = true;
@@ -100,15 +132,257 @@ bool audioDirty = false;
 bool displayReady = false;
 volatile uint8_t wifiDisconnectReason = 0;
 volatile bool wifiDisconnectReasonPending = false;
+const MusicGenreAnimal *currentGenreAnimal = nullptr;
+const MusicGenreAnimal *fallbackPet = nullptr;
+const MusicGenreAnimal *displayedPet = nullptr;
 uint32_t wifiConnectStartedAt = 0;
+uint32_t streamRestartAt = 0;
 uint32_t lastTouchAt = 0;
 uint32_t lastCatFrameAt = 0;
+uint32_t petTransitionStartedAt = 0;
+uint32_t nextDanceChangeAt = 0;
+uint32_t lastClockUpdateAt = 0;
+uint32_t lastBitrateUpdateAt = 0;
+uint32_t lastDisplayedBitrateKbps = UINT32_MAX;
+uint32_t lastFallbackPetChangeAt = 0;
+uint32_t lastBubbleShownAt = 0;
+uint32_t bubbleIntervalMs = MIN_BUBBLE_INTERVAL_MS;
+uint8_t bubblePetIndex = UINT8_MAX;
+uint8_t bubbleTextIndex = 0;
+bool bubbleVisible = false;
+bool petAnimationInitialized = false;
+PetTransition petTransition = PetTransition::Entering;
+PetDance petDance = PetDance::Bounce;
+PetOutfit petOutfit = PetOutfit::Tie;
 
 void startWifiConnection();
+void markUiDirty();
+uint8_t stationPageCount();
+void showStationPageFor(uint8_t index);
+
+void updateGenreAnimal() {
+  char metadata[256];
+  const char *configuredStation =
+      stationCount > 0 && selectedStation < stationCount
+          ? stations[selectedStation].name
+          : "";
+  snprintf(metadata, sizeof(metadata), "%s %s %s", configuredStation,
+           streamStation.c_str(), streamTitle.c_str());
+
+  const MusicGenreAnimal *detected = detectMusicGenre(metadata);
+  if (detected != currentGenreAnimal) {
+    currentGenreAnimal = detected;
+    fallbackPet = nullptr;
+    lastFallbackPetChangeAt = millis();
+    if (detected == nullptr) {
+      Serial.println("Genre: no genre found in station or stream metadata.");
+    } else {
+      Serial.printf("Genre: %s; animal: %s (%s).\n", detected->genre,
+                    detected->animalType, detected->animalName);
+    }
+    audioDirty = true;
+  }
+}
+
+void chooseDifferentFallbackPet() {
+  uint8_t previousIndex = 5;
+  if (fallbackPet != nullptr) {
+    for (uint8_t i = 0; i < MUSIC_GENRE_COUNT; ++i) {
+      if (&genreList[i] == fallbackPet) {
+        previousIndex = i;
+        break;
+      }
+    }
+  }
+
+  uint8_t nextIndex = esp_random() % (MUSIC_GENRE_COUNT - 1);
+  if (nextIndex >= previousIndex) {
+    ++nextIndex;
+  }
+  fallbackPet = &genreList[nextIndex];
+}
+
+void chooseDifferentBubbleText() {
+  uint8_t nextIndex = esp_random() % 9;
+  if (nextIndex >= bubbleTextIndex) {
+    ++nextIndex;
+  }
+  bubbleTextIndex = nextIndex;
+}
+
+uint32_t randomBubbleInterval() {
+  return MIN_BUBBLE_INTERVAL_MS +
+         esp_random() % (MAX_BUBBLE_INTERVAL_MS - MIN_BUBBLE_INTERVAL_MS + 1);
+}
+
+const MusicGenreAnimal *desiredPet() {
+  return currentGenreAnimal != nullptr ? currentGenreAnimal : fallbackPet;
+}
+
+PetDance randomDifferentDance(PetDance previous) {
+  uint8_t choice = esp_random() % 2;
+  const uint8_t previousIndex = static_cast<uint8_t>(previous);
+  if (choice >= previousIndex) {
+    ++choice;
+  }
+  return static_cast<PetDance>(choice);
+}
+
+uint32_t randomDanceDuration() {
+  return MIN_DANCE_DURATION_MS +
+         esp_random() % (MAX_DANCE_DURATION_MS - MIN_DANCE_DURATION_MS + 1);
+}
+
+void updatePetAnimation(uint32_t now) {
+  const MusicGenreAnimal *wantedPet = desiredPet();
+  if (!petAnimationInitialized) {
+    displayedPet = wantedPet;
+    petDance = static_cast<PetDance>(esp_random() % 3);
+    petOutfit = static_cast<PetOutfit>(esp_random() % 4);
+    petTransition = PetTransition::Entering;
+    petTransitionStartedAt = now;
+    nextDanceChangeAt = now + randomDanceDuration();
+    petAnimationInitialized = true;
+    return;
+  }
+
+  if (petTransition == PetTransition::Exiting &&
+      now - petTransitionStartedAt >= PET_TRANSITION_DURATION_MS) {
+    displayedPet = wantedPet;
+    petDance = static_cast<PetDance>(esp_random() % 3);
+    petOutfit = static_cast<PetOutfit>(esp_random() % 4);
+    petTransition = PetTransition::Entering;
+    petTransitionStartedAt = now;
+    nextDanceChangeAt = now + randomDanceDuration();
+  } else if (petTransition == PetTransition::Entering &&
+             now - petTransitionStartedAt >= PET_TRANSITION_DURATION_MS) {
+    petTransition = PetTransition::Idle;
+    if (displayedPet != wantedPet) {
+      petTransition = PetTransition::Exiting;
+      petTransitionStartedAt = now;
+    }
+  } else if (petTransition == PetTransition::Idle) {
+    if (displayedPet != wantedPet) {
+      petTransition = PetTransition::Exiting;
+      petTransitionStartedAt = now;
+    } else if (now >= nextDanceChangeAt) {
+      petDance = randomDifferentDance(petDance);
+      nextDanceChangeAt = now + randomDanceDuration();
+    }
+  }
+}
+
+int16_t petTransitionOffset(uint32_t now) {
+  if (petTransition == PetTransition::Idle) {
+    return 0;
+  }
+  const uint32_t elapsed = min<uint32_t>(
+      now - petTransitionStartedAt, PET_TRANSITION_DURATION_MS);
+  const int16_t travel = static_cast<int16_t>(
+      elapsed * FAT_CAT_PANEL_WIDTH / PET_TRANSITION_DURATION_MS);
+  return petTransition == PetTransition::Exiting
+             ? -travel
+             : travel - FAT_CAT_PANEL_WIDTH;
+}
+
+void shiftPetPanel(TFT_eSprite &frameBuffer, int16_t offset) {
+  if (offset == 0) {
+    return;
+  }
+  const int16_t distance = abs(offset);
+  if (distance >= FAT_CAT_PANEL_WIDTH) {
+    frameBuffer.fillRect(0, 0, FAT_CAT_PANEL_WIDTH, 195, 0x0841);
+    return;
+  }
+
+  auto *pixels = static_cast<uint8_t *>(frameBuffer.getPointer());
+  if (pixels == nullptr) {
+    Serial.println("ERROR: missing display frame buffer during pet transition.");
+    return;
+  }
+  for (int16_t y = 0; y < 195; ++y) {
+    uint8_t *row = pixels + y * DISPLAY_WIDTH;
+    if (offset > 0) {
+      memmove(row + distance, row, FAT_CAT_PANEL_WIDTH - distance);
+    } else {
+      memmove(row, row + distance, FAT_CAT_PANEL_WIDTH - distance);
+    }
+  }
+  if (offset > 0) {
+    frameBuffer.fillRect(0, 0, distance, 195, 0x0841);
+  } else {
+    frameBuffer.fillRect(FAT_CAT_PANEL_WIDTH - distance, 0, distance, 195,
+                         0x0841);
+  }
+}
+
+void updateBubbleText(uint32_t now) {
+  const MusicGenreAnimal *pet =
+      currentGenreAnimal != nullptr ? currentGenreAnimal : fallbackPet;
+  uint8_t nextPetIndex = 5;
+  if (pet != nullptr) {
+    for (uint8_t i = 0; i < MUSIC_GENRE_COUNT; ++i) {
+      if (&genreList[i] == pet) {
+        nextPetIndex = i;
+        break;
+      }
+    }
+  }
+
+  if (nextPetIndex != bubblePetIndex) {
+    bubblePetIndex = nextPetIndex;
+    bubbleTextIndex = esp_random() % 10;
+    bubbleVisible = true;
+    lastBubbleShownAt = now;
+    bubbleIntervalMs = randomBubbleInterval();
+    markUiDirty();
+    return;
+  }
+
+  if (bubbleVisible && now - lastBubbleShownAt >= BUBBLE_VISIBLE_MS) {
+    bubbleVisible = false;
+    markUiDirty();
+  } else if (!bubbleVisible &&
+             now - lastBubbleShownAt >= bubbleIntervalMs) {
+    chooseDifferentBubbleText();
+    bubbleVisible = true;
+    lastBubbleShownAt = now;
+    bubbleIntervalMs = randomBubbleInterval();
+    markUiDirty();
+  }
+}
+
+void drawSpeechBubble(TFT_eSprite &frameBuffer, const char *text) {
+  constexpr int16_t BUBBLE_X = 4;
+  constexpr int16_t BUBBLE_Y = 48;
+  constexpr int16_t BUBBLE_WIDTH = 88;
+  constexpr int16_t BUBBLE_HEIGHT = 30;
+  frameBuffer.fillRoundRect(BUBBLE_X, BUBBLE_Y, BUBBLE_WIDTH, BUBBLE_HEIGHT,
+                            6, TFT_WHITE);
+  frameBuffer.drawRoundRect(BUBBLE_X, BUBBLE_Y, BUBBLE_WIDTH, BUBBLE_HEIGHT,
+                            6, 0x4208);
+  frameBuffer.fillTriangle(39, 76, 49, 76, 44, 84, TFT_WHITE);
+  frameBuffer.drawLine(39, 76, 44, 84, 0x4208);
+  frameBuffer.drawLine(49, 76, 44, 84, 0x4208);
+  frameBuffer.setTextDatum(MC_DATUM);
+  frameBuffer.setTextColor(TFT_BLACK, TFT_WHITE);
+  frameBuffer.drawString(text, 48, 63, 1);
+}
 
 void drawCatFrame(uint32_t now) {
-  drawFatCat(catFrameBuffer, now);
-  catFrameBuffer.pushSprite(0, 0);
+  if (displayedPet == nullptr) {
+    drawFatCat(screenFrameBuffer, now, "Claudia", petDance, petOutfit);
+  } else {
+    drawGenreAnimal(screenFrameBuffer, now, *displayedPet, petDance, petOutfit);
+  }
+  if (bubbleVisible) {
+    drawSpeechBubble(screenFrameBuffer,
+                     bubbleTexts[bubblePetIndex][bubbleTextIndex]);
+  }
+  shiftPetPanel(screenFrameBuffer, petTransitionOffset(now));
+  drawAudioSpectrum(screenFrameBuffer, now, currentGenreAnimal, streamActive,
+                    audioSpectrumEnabled);
+  screenFrameBuffer.pushSprite(0, 0);
 }
 
 bool pointInRect(int16_t x, int16_t y, int16_t left, int16_t top,
@@ -121,6 +395,7 @@ void markUiDirty() {
 }
 
 String fittedText(const String &source, int16_t maxWidth, uint8_t font = 2) {
+  TFT_eSPI &display = *renderTarget;
   String result = source;
   if (display.textWidth(result, font) <= maxWidth) {
     return result;
@@ -162,6 +437,7 @@ String keyboardRow(uint8_t row) {
 
 void drawText(const String &text, int16_t x, int16_t y, uint8_t font = 2,
               uint16_t colour = TFT_WHITE) {
+  TFT_eSPI &display = *renderTarget;
   display.setTextDatum(TL_DATUM);
   display.setTextColor(colour, BACKGROUND);
   display.drawString(text, x, y, font);
@@ -170,6 +446,7 @@ void drawText(const String &text, int16_t x, int16_t y, uint8_t font = 2,
 void drawButton(int16_t x, int16_t y, int16_t width, int16_t height,
                 const String &label, uint16_t fill = PANEL_LIGHT,
                 uint16_t colour = TFT_WHITE, uint8_t font = 2) {
+  TFT_eSPI &display = *renderTarget;
   display.fillRoundRect(x, y, width, height, 7, fill);
   display.drawRoundRect(x, y, width, height, 7, 0x4208);
   display.setTextDatum(MC_DATUM);
@@ -178,6 +455,7 @@ void drawButton(int16_t x, int16_t y, int16_t width, int16_t height,
 }
 
 void drawPanelHeader(const String &title) {
+  TFT_eSPI &display = *renderTarget;
   display.fillRect(CAT_PANEL_WIDTH, 0, DISPLAY_WIDTH - CAT_PANEL_WIDTH,
                    DISPLAY_HEIGHT, BACKGROUND);
   display.setTextDatum(TL_DATUM);
@@ -188,29 +466,57 @@ void drawPanelHeader(const String &title) {
 
 String wifiStatusText() {
   if (wifiConnecting) {
-    return "Verbinde mit WLAN...";
+    return "Connecting to Wi-Fi...";
   }
   if (WiFi.status() == WL_CONNECTED) {
     return WiFi.localIP().toString();
   }
   if (wifiSsid.isEmpty()) {
-    return "WLAN nicht eingerichtet";
+    return "Wi-Fi not configured";
   }
   return statusMessage;
 }
 
 void drawHome() {
+  TFT_eSPI &display = *renderTarget;
   drawPanelHeader("PET RADIO");
+  struct tm localTime {};
+  char clockText[20] = "--.-- --:--";
+  if (getLocalTime(&localTime, 0)) {
+    snprintf(clockText, sizeof(clockText), "%02d.%02d %02d:%02d",
+             localTime.tm_mday, localTime.tm_mon + 1, localTime.tm_hour,
+             localTime.tm_min);
+  }
+  display.setTextDatum(TR_DATUM);
+  display.setTextColor(TFT_WHITE, BACKGROUND);
+  display.drawString(clockText, UI_LEFT + UI_WIDTH, 2, 1);
+  const String genreText =
+      currentGenreAnimal == nullptr
+          ? "Genre: --"
+          : String("Genre: ") + currentGenreAnimal->genre;
+  display.setTextColor(TFT_CYAN, BACKGROUND);
+  display.drawString(fittedText(genreText, 112, 1), UI_LEFT + UI_WIDTH, 14, 1);
+
   const bool connected = WiFi.status() == WL_CONNECTED;
   display.fillCircle(UI_LEFT + 5, 43, 3, connected ? SUCCESS : ERROR_COLOUR);
-  drawText(connected ? "WLAN verbunden" : wifiStatusText(), UI_LEFT + 13, 37,
+  drawText(connected ? "Wi-Fi connected" : wifiStatusText(), UI_LEFT + 13, 37,
            1, connected ? SUCCESS : TEXT_MUTED);
+  if (connected) {
+    const uint32_t bitrateKbps =
+        streamActive ? (radioAudio.getBitRate() + 500) / 1000 : 0;
+    display.setTextDatum(TR_DATUM);
+    display.setTextColor(TEXT_MUTED, BACKGROUND);
+    display.drawString(bitrateKbps == 0
+                           ? "-- kbit/s"
+                           : String(bitrateKbps) + " kbit/s",
+                       UI_LEFT + UI_WIDTH, 37, 1);
+  }
 
   display.fillRoundRect(UI_LEFT, 53, UI_WIDTH, 45, 7, PANEL);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TFT_WHITE, PANEL);
   const String stationName =
-      stationCount == 0 ? "Keine Sender" : stations[selectedStation].name;
+      stationCount == 0 ? "No stations" : stations[selectedStation].name;
   display.drawString(fittedText(stationName, UI_WIDTH - 14), UI_LEFT + 7, 59,
                      2);
   display.setTextColor(TEXT_MUTED, PANEL);
@@ -229,7 +535,7 @@ void drawHome() {
 
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TFT_WHITE, BACKGROUND);
-  display.drawString("LAUTSTAERKE", UI_LEFT, 151, 1);
+  display.drawString("VOLUME", UI_LEFT, 151, 1);
   display.setTextDatum(TR_DATUM);
   display.drawString(String(volume * 100 / 21) + "%", UI_LEFT + UI_WIDTH,
                      151, 1);
@@ -239,64 +545,77 @@ void drawHome() {
   display.fillRoundRect(UI_LEFT + 2, 170, sliderWidth, 4, 2, ACCENT);
   display.fillCircle(UI_LEFT + 2 + sliderWidth, 172, 6, TFT_WHITE);
 
-  drawButton(UI_LEFT, 190, 99, 36, "SENDER", PANEL_LIGHT);
-  drawButton(UI_LEFT + 105, 190, 105, 36, "MENUE", PANEL_LIGHT);
+  drawButton(UI_LEFT, 190, 99, 36, "STATIONS", PANEL_LIGHT);
+  drawButton(UI_LEFT + 105, 190, 105, 36, "MENU", PANEL_LIGHT);
 }
 
 void drawSettings() {
-  drawPanelHeader("EINSTELLUNGEN");
-  drawButton(UI_LEFT, 43, UI_WIDTH, 42, "WLAN", PANEL_LIGHT);
-  drawButton(UI_LEFT, 94, UI_WIDTH, 42, "SENDERLISTE", PANEL_LIGHT);
-  drawButton(UI_LEFT, 145, UI_WIDTH, 42, "ZURUECK", PANEL_LIGHT);
+  TFT_eSPI &display = *renderTarget;
+  drawPanelHeader("SETTINGS");
+  drawButton(UI_LEFT, 37, UI_WIDTH, 30, "WI-FI", PANEL_LIGHT);
+  drawButton(UI_LEFT, 72, UI_WIDTH, 30, "STATION LIST", PANEL_LIGHT);
+  drawButton(UI_LEFT, 107, UI_WIDTH, 30,
+             String("AUDIO BOOST +6 dB: ") + (audioBoost ? "ON" : "OFF"),
+             audioBoost ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT, 142, UI_WIDTH, 30,
+             String("SPECTRUM: ") + (audioSpectrumEnabled ? "ON" : "OFF"),
+             audioSpectrumEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, BACKGROUND);
-  display.drawString("LAUTSTAERKE", UI_LEFT, 195, 1);
+  display.drawString("VOLUME", UI_LEFT, 178, 1);
   display.setTextDatum(TR_DATUM);
   display.drawString(String(volume * 100 / 21) + "%", UI_LEFT + UI_WIDTH,
-                     195, 1);
-  display.fillRoundRect(UI_LEFT, 213, UI_WIDTH, 8, 4, PANEL_LIGHT);
+                     178, 1);
+  display.fillRoundRect(UI_LEFT, 195, UI_WIDTH, 8, 4, PANEL_LIGHT);
   const int16_t sliderWidth =
       static_cast<int16_t>((UI_WIDTH - 4) * volume / 21);
-  display.fillRoundRect(UI_LEFT + 2, 215, sliderWidth, 4, 2, ACCENT);
-  display.fillCircle(UI_LEFT + 2 + sliderWidth, 217, 6, TFT_WHITE);
+  display.fillRoundRect(UI_LEFT + 2, 197, sliderWidth, 4, 2, ACCENT);
+  display.fillCircle(UI_LEFT + 2 + sliderWidth, 199, 6, TFT_WHITE);
+  drawButton(UI_LEFT, 208, UI_WIDTH, 27, "BACK", PANEL_LIGHT, TFT_WHITE, 1);
 }
 
 void drawWifiSettings() {
-  drawPanelHeader("WLAN EINSTELLEN");
+  TFT_eSPI &display = *renderTarget;
+  drawPanelHeader("WI-FI SETTINGS");
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, BACKGROUND);
-  display.drawString("NETZWERKNAME (SSID)", UI_LEFT, 40, 1);
+  display.drawString("NETWORK NAME (SSID)", UI_LEFT, 40, 1);
   drawButton(UI_LEFT, 54, UI_WIDTH, 34,
-             fittedText(wifiSsid.isEmpty() ? "(SSID eingeben)" : wifiSsid,
+             fittedText(wifiSsid.isEmpty() ? "(Enter SSID)" : wifiSsid,
                         UI_WIDTH - 16, 1),
              PANEL);
   display.setTextColor(TEXT_MUTED, BACKGROUND);
-  display.drawString("PASSWORT", UI_LEFT, 97, 1);
+  display.drawString("PASSWORD", UI_LEFT, 97, 1);
   String passwordPreview = passwordForDisplay(wifiPassword);
   if (wifiPassword.isEmpty()) {
-    passwordPreview = "(Passwort eingeben)";
+    passwordPreview = "(Enter password)";
   }
   drawButton(UI_LEFT, 111, UI_WIDTH, 34,
              fittedText(passwordPreview, UI_WIDTH - 16, 1), PANEL);
 
   drawButton(UI_LEFT, 151, UI_WIDTH, 18,
-             String("PASSWORT ANZEIGEN: ") + (showWifiPassword ? "AN" : "AUS"),
+             String("SHOW PASSWORD: ") + (showWifiPassword ? "ON" : "OFF"),
              showWifiPassword ? 0x2147 : PANEL, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 176, 101, 32, "VERBINDEN",
+  drawButton(UI_LEFT, 176, 101, 32, "CONNECT",
              wifiConnecting ? 0x3186 : ACCENT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 109, 176, 101, 32, "ZURUECK", PANEL_LIGHT, TFT_WHITE,
+  drawButton(UI_LEFT + 109, 176, 101, 32, "BACK", PANEL_LIGHT, TFT_WHITE,
              1);
   drawText(fittedText(wifiStatusText(), UI_WIDTH, 1), UI_LEFT, 216, 1,
            WiFi.status() == WL_CONNECTED ? SUCCESS : TEXT_MUTED);
 }
 
 void drawStations() {
-  drawPanelHeader("SENDERLISTE");
-  drawText(fittedText(statusMessage, UI_WIDTH, 1), UI_LEFT, 32, 1,
-           TEXT_MUTED);
+  TFT_eSPI &display = *renderTarget;
+  drawPanelHeader("STATION LIST");
+  const uint8_t pageCount = stationPageCount();
+  const uint8_t pageStart = stationListPage * STATIONS_PER_PAGE;
+  const uint8_t visibleStations =
+      min<uint8_t>(STATIONS_PER_PAGE, stationCount - pageStart);
+  drawText(String(stationCount) + " STATIONS", UI_LEFT, 32, 1, TEXT_MUTED);
   if (deleteConfirmation) {
-    for (uint8_t i = 0; i < stationCount; ++i) {
-      const int16_t rowY = 41 + i * 27;
+    for (uint8_t row = 0; row < visibleStations; ++row) {
+      const uint8_t i = pageStart + row;
+      const int16_t rowY = 41 + row * 27;
       drawButton(UI_LEFT, rowY, UI_WIDTH, 24,
                  fittedText(stations[i].name, UI_WIDTH - 10, 1),
                  i == selectedStation ? 0x2147 : PANEL, TFT_WHITE, 1);
@@ -305,17 +624,18 @@ void drawStations() {
     display.drawRoundRect(UI_LEFT + 9, 83, UI_WIDTH - 18, 83, 8, TFT_CYAN);
     display.setTextDatum(MC_DATUM);
     display.setTextColor(TFT_WHITE, PANEL_LIGHT);
-    display.drawString("Sender loeschen?", 208, 101, 2);
+    display.drawString("Delete station?", 208, 101, 2);
     display.drawString(
         fittedText(stations[deleteIndex].name, 170, 1), 208, 124, 1);
-    drawButton(UI_LEFT + 14, 136, 88, 25, "ABBRECHEN", PANEL, TFT_WHITE, 1);
-    drawButton(UI_LEFT + 108, 136, 88, 25, "LOESCHEN", ERROR_COLOUR,
+    drawButton(UI_LEFT + 14, 136, 88, 25, "CANCEL", PANEL, TFT_WHITE, 1);
+    drawButton(UI_LEFT + 108, 136, 88, 25, "DELETE", ERROR_COLOUR,
                TFT_WHITE, 1);
     return;
   }
 
-  for (uint8_t i = 0; i < stationCount; ++i) {
-    const int16_t rowY = 41 + i * 27;
+  for (uint8_t row = 0; row < visibleStations; ++row) {
+    const uint8_t i = pageStart + row;
+    const int16_t rowY = 41 + row * 27;
     const uint16_t fill = i == selectedStation ? 0x2147 : PANEL;
     display.fillRoundRect(UI_LEFT, rowY, UI_WIDTH, 24, 5, fill);
     display.setTextDatum(ML_DATUM);
@@ -327,13 +647,20 @@ void drawStations() {
     display.drawString("E", UI_LEFT + 165, rowY + 12, 1);
     display.drawString("x", UI_LEFT + 195, rowY + 12, 2);
   }
-  drawButton(UI_LEFT, 204, 101, 25, "+ HINZUFUEGEN", ACCENT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 109, 204, 101, 25, "ZURUECK", PANEL_LIGHT, TFT_WHITE,
+  drawButton(UI_LEFT, 204, 28, 25, "<", PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT + 30, 204, 28, 25, ">", PANEL_LIGHT, TFT_WHITE, 1);
+  display.setTextDatum(MC_DATUM);
+  display.setTextColor(TFT_WHITE, BACKGROUND);
+  display.drawString(String(stationListPage + 1) + "/" + String(pageCount),
+                     UI_LEFT + 75, 216, 1);
+  drawButton(UI_LEFT + 94, 204, 62, 25, "+ STATION", ACCENT, TFT_WHITE, 1);
+  drawButton(UI_LEFT + 158, 204, 52, 25, "BACK", PANEL_LIGHT, TFT_WHITE,
              1);
 }
 
 void drawStationEditor() {
-  drawPanelHeader(stationEditorIsNew ? "NEUER SENDER" : "SENDER AENDERN");
+  TFT_eSPI &display = *renderTarget;
+  drawPanelHeader(stationEditorIsNew ? "NEW STATION" : "EDIT STATION");
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, BACKGROUND);
   display.drawString("NAME", UI_LEFT, 40, 1);
@@ -343,20 +670,21 @@ void drawStationEditor() {
   display.drawString("STREAM-URL", UI_LEFT, 94, 1);
   drawButton(UI_LEFT, 108, UI_WIDTH, 32,
              fittedText(editUrl, UI_WIDTH - 14, 1), PANEL);
-  drawButton(UI_LEFT, 159, 101, 36, "SPEICHERN", ACCENT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 109, 159, 101, 36, "ZURUECK", PANEL_LIGHT, TFT_WHITE,
+  drawButton(UI_LEFT, 159, 101, 36, "SAVE", ACCENT, TFT_WHITE, 1);
+  drawButton(UI_LEFT + 109, 159, 101, 36, "BACK", PANEL_LIGHT, TFT_WHITE,
              1);
   drawText("MP3/AAC-Stream (http/https)", UI_LEFT, 210, 1, TEXT_MUTED);
 }
 
 void drawKeyboard() {
+  TFT_eSPI &display = *renderTarget;
   drawPanelHeader(keyboardTarget == KeyboardTarget::Ssid
-                      ? "SSID EINGEBEN"
+                      ? "ENTER SSID"
                   : keyboardTarget == KeyboardTarget::Password
-                      ? "PASSWORT EINGEBEN"
+                      ? "ENTER PASSWORD"
                   : keyboardTarget == KeyboardTarget::StationName
-                      ? "SENDERNAME EINGEBEN"
-                      : "STREAM-URL EINGEBEN");
+                      ? "STATION NAME"
+                      : "ENTER STREAM URL");
   const bool editingPassword = keyboardTarget == KeyboardTarget::Password;
   const String visibleValue =
       editingPassword ? passwordForDisplay(keyboardValue) : keyboardValue;
@@ -366,7 +694,7 @@ void drawKeyboard() {
   drawText(fittedText(visibleValue, valueWidth, 1), UI_LEFT, 40, 1, TFT_WHITE);
   if (editingPassword) {
     drawButton(UI_LEFT + UI_WIDTH - 48, 36, 48, 19,
-               showWifiPassword ? "VERB." : "ANZEIG.", PANEL_LIGHT,
+               showWifiPassword ? "HIDE" : "SHOW", PANEL_LIGHT,
                TFT_WHITE, 1);
   }
   display.drawFastHLine(UI_LEFT, 58, UI_WIDTH, 0x4208);
@@ -399,14 +727,18 @@ void drawKeyboard() {
              keyboardPage == 0 ? "?123"
                                : keyboardPage == 1 ? "SYM2" : "SYM1",
              PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 95, 156, 66, 24, "LEER", PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT + 95, 156, 66, 24, "SPACE", PANEL_LIGHT, TFT_WHITE, 1);
   drawButton(UI_LEFT + 165, 156, 45, 24, "<-", PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 192, 98, 31, "ABBRUCH", PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 106, 192, 104, 31, "FERTIG", ACCENT, TFT_WHITE, 1);
+  drawButton(UI_LEFT, 192, 98, 31, "CANCEL", PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT + 106, 192, 104, 31, "DONE", ACCENT, TFT_WHITE, 1);
 }
 
 void renderScreen() {
-  drawCatFrame(millis());
+  renderTarget = &screenFrameBuffer;
+  screenFrameBuffer.fillSprite(BACKGROUND);
+  screenFrameBuffer.setViewport(CAT_PANEL_WIDTH, 0,
+                                DISPLAY_WIDTH - CAT_PANEL_WIDTH,
+                                DISPLAY_HEIGHT, false);
   switch (currentScreen) {
     case Screen::Home:
       drawHome();
@@ -427,7 +759,10 @@ void renderScreen() {
       drawKeyboard();
       break;
   }
+  screenFrameBuffer.resetViewport();
+  drawCatFrame(millis());
   uiDirty = false;
+  renderTarget = &display;
 }
 
 void drawCalibrationTarget(uint8_t index) {
@@ -436,8 +771,8 @@ void drawCalibrationTarget(uint8_t index) {
   display.fillScreen(BACKGROUND);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TFT_WHITE, BACKGROUND);
-  display.drawString("Touch-Kalibrierung", 24, 72, 2);
-  display.drawString("Ziel beruehren " + String(index + 1) + "/4", 24, 101,
+  display.drawString("Touch calibration", 24, 72, 2);
+  display.drawString("Touch target " + String(index + 1) + "/4", 24, 101,
                      2);
   display.drawCircle(targetX[index], targetY[index], 13, TFT_CYAN);
   display.drawFastHLine(targetX[index] - 18, targetY[index], 37, TFT_CYAN);
@@ -502,7 +837,7 @@ void calibrateTouchscreen() {
 
     display.fillScreen(TFT_RED);
     display.setTextColor(TFT_WHITE, TFT_RED);
-    display.drawCentreString("Kalibrierung fehlgeschlagen", DISPLAY_WIDTH / 2,
+    display.drawCentreString("Calibration failed", DISPLAY_WIDTH / 2,
                              DISPLAY_HEIGHT / 2, 2);
     Serial.println("ERROR: touchscreen calibration range is invalid.");
     delay(1500);
@@ -570,6 +905,15 @@ void setStatus(const String &message) {
   markUiDirty();
 }
 
+uint8_t stationPageCount() {
+  return max<uint8_t>(
+      1, (stationCount + STATIONS_PER_PAGE - 1) / STATIONS_PER_PAGE);
+}
+
+void showStationPageFor(uint8_t index) {
+  stationListPage = index / STATIONS_PER_PAGE;
+}
+
 bool saveVolume() {
   return preferences.putUChar("volume", volume) > 0;
 }
@@ -585,28 +929,45 @@ bool saveStationList() {
     saved &= preferences.putString(urlKey, stations[i].url) > 0;
   }
   if (!saved) {
-    setStatus("Fehler beim Speichern der Sender");
+    setStatus("Could not save station list");
     Serial.println("ERROR: could not persist the station list.");
   }
   return saved;
 }
 
+void loadDefaultStations() {
+  stationCount = DEFAULT_STATION_COUNT;
+  for (uint8_t i = 0; i < stationCount; ++i) {
+    strlcpy(stations[i].name, DEFAULT_STATION_NAMES[i],
+            sizeof(stations[i].name));
+    strlcpy(stations[i].url, DEFAULT_STATION_URLS[i],
+            sizeof(stations[i].url));
+  }
+}
+
+bool isLegacyDefaultPlaylist() {
+  if (stationCount != 3) {
+    return false;
+  }
+  return strcmp(stations[0].name, "Radio Paradise") == 0 &&
+         strcmp(stations[0].url, "http://stream.radioparadise.com/mp3-128") ==
+             0 &&
+         strcmp(stations[1].name, "SomaFM Groove Salad") == 0 &&
+         strcmp(stations[1].url,
+                "https://ice1.somafm.com/groovesalad-128-mp3") == 0 &&
+         strcmp(stations[2].name, "Deutschlandfunk") == 0 &&
+         strcmp(stations[2].url,
+                "https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3") ==
+             0;
+}
+
 void loadStations() {
-  stationCount = min<uint8_t>(preferences.getUChar("count", 0), MAX_STATIONS);
   if (!preferences.isKey("count")) {
-    const char *defaultNames[] = {"Radio Paradise", "SomaFM Groove Salad",
-                                  "Deutschlandfunk"};
-    const char *defaultUrls[] = {
-        "http://stream.radioparadise.com/mp3-128",
-        "https://ice1.somafm.com/groovesalad-128-mp3",
-        "https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3"};
-    stationCount = 3;
-    for (uint8_t i = 0; i < stationCount; ++i) {
-      strlcpy(stations[i].name, defaultNames[i], sizeof(stations[i].name));
-      strlcpy(stations[i].url, defaultUrls[i], sizeof(stations[i].url));
-    }
+    loadDefaultStations();
     saveStationList();
   } else {
+    stationCount =
+        min<uint8_t>(preferences.getUChar("count", 0), MAX_STATIONS);
     for (uint8_t i = 0; i < stationCount; ++i) {
       char nameKey[5];
       char urlKey[5];
@@ -623,9 +984,14 @@ void loadStations() {
         break;
       }
     }
+    if (isLegacyDefaultPlaylist()) {
+      loadDefaultStations();
+      saveStationList();
+      Serial.println("Migrated default playlist to favorite stations.");
+    }
   }
   if (stationCount == 0) {
-    setStatus("Keine Sender vorhanden");
+    setStatus("No stations available");
   }
 }
 
@@ -633,35 +999,60 @@ void setVolume(uint8_t newVolume) {
   volume = min<uint8_t>(newVolume, 21);
   radioAudio.setVolume(volume);
   if (!saveVolume()) {
-    setStatus("Lautstaerke nicht gespeichert");
+    setStatus("Could not save volume");
   } else {
     markUiDirty();
   }
 }
 
+void setAudioBoost(bool enabled) {
+  audioBoost = enabled;
+  const int8_t gain = audioBoost ? AUDIO_BOOST_DB : 0;
+  radioAudio.setTone(gain, gain, gain);
+  if (preferences.putBool("boost", audioBoost) == 0) {
+    Serial.println("ERROR: could not save audio boost setting.");
+    setStatus("Could not save audio boost");
+    return;
+  }
+  setStatus(audioBoost ? "Audio boost enabled" : "Audio boost disabled");
+}
+
+void setAudioSpectrum(bool enabled) {
+  audioSpectrumEnabled = enabled;
+  setAudioSpectrumEnabled(enabled);
+  if (preferences.putBool("spectrum", audioSpectrumEnabled) == 0) {
+    Serial.println("ERROR: could not save spectrum setting.");
+    setStatus("Could not save spectrum setting");
+    return;
+  }
+  markUiDirty();
+}
+
 void startStream() {
   if (stationCount == 0) {
-    setStatus("Keine Sender vorhanden");
+    setStatus("No stations available");
     return;
   }
   if (WiFi.status() != WL_CONNECTED) {
-    setStatus(wifiSsid.isEmpty() ? "Wi-Fi einrichten" : "WLAN nicht verbunden");
+    setStatus(wifiSsid.isEmpty() ? "Set up Wi-Fi" : "Wi-Fi not connected");
     return;
   }
 
   streamTitle = "";
   streamStation = "";
+  streamRestartPending = false;
+  updateGenreAnimal();
   radioAudio.stopSong();
   radioAudio.setVolume(volume);
   if (!radioAudio.connecttohost(stations[selectedStation].url)) {
     streamActive = false;
-    setStatus("Stream konnte nicht starten");
+    setStatus("Could not start stream");
     Serial.printf("ERROR: could not connect to station %u.\n",
                   selectedStation + 1);
     return;
   }
   streamActive = true;
-  setStatus("Stream verbindet...");
+  setStatus("Connecting to stream...");
 }
 
 void selectStation(uint8_t index) {
@@ -669,6 +1060,9 @@ void selectStation(uint8_t index) {
     return;
   }
   selectedStation = index;
+  streamTitle = "";
+  streamStation = "";
+  updateGenreAnimal();
   if (preferences.putUChar("selected", selectedStation) == 0) {
     Serial.println("ERROR: could not save selected station.");
   }
@@ -678,14 +1072,14 @@ void selectStation(uint8_t index) {
   } else if (!wifiSsid.isEmpty()) {
     startWifiConnection();
   } else {
-    setStatus("Wi-Fi einrichten");
+    setStatus("Set up Wi-Fi");
   }
   markUiDirty();
 }
 
 void beginWifiConnection() {
   if (wifiSsid.isEmpty()) {
-    setStatus("Bitte zuerst eine SSID eingeben");
+    setStatus("Enter an SSID first");
     return;
   }
   radioAudio.stopSong();
@@ -699,7 +1093,7 @@ bool saveWifiCredentials() {
       preferences.putString("password", wifiPassword) > 0;
   if (!savedSsid || !savedPassword) {
     Serial.println("ERROR: could not save Wi-Fi credentials.");
-    setStatus("WLAN-Daten konnten nicht gespeichert werden");
+    setStatus("Could not save Wi-Fi credentials");
     return false;
   }
   return true;
@@ -709,7 +1103,7 @@ void startWifiConnection() {
   if (wifiPassword.length() < 8 || wifiPassword.length() > 63) {
     wifiConnecting = false;
     playWhenConnected = false;
-    setStatus("WPA2-Passwort muss 8-63 Zeichen haben");
+    setStatus("WPA2 password must be 8-63 characters");
     return;
   }
 
@@ -718,14 +1112,14 @@ void startWifiConnection() {
   wifiConnecting = true;
   playWhenConnected = true;
   wifiConnectStartedAt = millis();
-  setStatus("Verbinde mit WLAN...");
+  setStatus("Connecting to Wi-Fi...");
 
   const wl_status_t result =
       WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
   if (result == WL_CONNECT_FAILED) {
     wifiConnecting = false;
     playWhenConnected = false;
-    setStatus("WLAN-Start fehlgeschlagen");
+    setStatus("Could not start Wi-Fi");
     Serial.println("ERROR: Wi-Fi rejected the connection request.");
   }
   Serial.printf("Wi-Fi connect requested (SSID length %u, password length "
@@ -737,21 +1131,21 @@ void startWifiConnection() {
 
 String wifiFailureMessage(wl_status_t status, uint8_t reason) {
   if (reason == WIFI_REASON_NO_AP_FOUND || status == WL_NO_SSID_AVAIL) {
-    return "SSID nicht gefunden (2,4-GHz-Netz pruefen)";
+    return "SSID not found (check 2.4 GHz network)";
   }
   if (reason == WIFI_REASON_AUTH_FAIL ||
       reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
       reason == WIFI_REASON_HANDSHAKE_TIMEOUT ||
       status == WL_CONNECT_FAILED) {
-    return "Anmeldung fehlgeschlagen: WPA2-Passwort pruefen";
+    return "Authentication failed: check WPA2 password";
   }
   if (reason == WIFI_REASON_ASSOC_FAIL) {
-    return "Router lehnt die Anmeldung ab";
+    return "Router rejected the connection";
   }
   if (status == WL_CONNECTION_LOST) {
-    return "WLAN-Verbindung abgebrochen";
+    return "Wi-Fi connection lost";
   }
-  return "WLAN-Fehler " + String(reason) + " (Status " +
+  return "Wi-Fi error " + String(reason) + " (status " +
          String(static_cast<int>(status)) + ")";
 }
 
@@ -770,7 +1164,8 @@ void updateNetwork() {
     if (wifiConnecting) {
       wifiConnecting = false;
       wifiDisconnectReason = 0;
-      setStatus("WLAN verbunden");
+      configTzTime(BERLIN_TIMEZONE, "pool.ntp.org", "time.google.com");
+      setStatus("Wi-Fi connected");
       if (playWhenConnected) {
         playWhenConnected = false;
         startStream();
@@ -795,6 +1190,9 @@ void startStationEditor(bool isNew, uint8_t index) {
   editorIndex = index;
   editName = isNew ? "" : stations[index].name;
   editUrl = isNew ? "" : stations[index].url;
+  if (isNew) {
+    showStationPageFor(index);
+  }
   currentScreen = Screen::StationEditor;
   markUiDirty();
 }
@@ -925,7 +1323,7 @@ void saveStationEditor() {
   editUrl.trim();
   if (editName.isEmpty() || editUrl.isEmpty() ||
       !(editUrl.startsWith("http://") || editUrl.startsWith("https://"))) {
-    setStatus("Name und gueltige http(s)-URL eingeben");
+    setStatus("Enter a name and valid HTTP(S) URL");
     return;
   }
 
@@ -933,7 +1331,7 @@ void saveStationEditor() {
   const bool changedPlayingStation =
       !stationEditorIsNew && streamActive && index == selectedStation;
   if (index >= MAX_STATIONS) {
-    setStatus("Senderliste ist voll");
+    setStatus("Station list is full");
     return;
   }
   strlcpy(stations[index].name, editName.c_str(), sizeof(stations[index].name));
@@ -945,7 +1343,7 @@ void saveStationEditor() {
   const bool saved = saveStationList();
   currentScreen = Screen::Stations;
   if (saved) {
-    setStatus("Sender gespeichert");
+    setStatus("Station saved");
     if (changedPlayingStation) {
       startStream();
     }
@@ -962,9 +1360,15 @@ void deleteStation(uint8_t index) {
     stations[i] = stations[i + 1];
   }
   --stationCount;
+  if (stationListPage >= stationPageCount()) {
+    stationListPage = stationPageCount() - 1;
+  }
   if (stationCount == 0) {
     selectedStation = 0;
     streamActive = false;
+    streamTitle = "";
+    streamStation = "";
+    updateGenreAnimal();
     radioAudio.stopSong();
   } else if (index < selectedStation) {
     --selectedStation;
@@ -977,7 +1381,7 @@ void deleteStation(uint8_t index) {
   }
   deleteConfirmation = false;
   if (saved) {
-    setStatus("Sender geloescht");
+    setStatus("Station deleted");
   }
   if (deletedCurrentStation && stationCount > 0) {
     startStream();
@@ -1001,7 +1405,7 @@ void handleHomeTouch(int16_t x, int16_t y) {
     if (streamActive) {
       radioAudio.stopSong();
       streamActive = false;
-      setStatus("Pausiert");
+      setStatus("Paused");
     } else {
       startStream();
     }
@@ -1032,8 +1436,9 @@ void handleStationTouch(int16_t x, int16_t y) {
   }
 
   if (y >= 41 && y < 41 + stationCount * 27) {
-    const uint8_t index = (y - 41) / 27;
-    if (index < stationCount) {
+    const uint8_t row = (y - 41) / 27;
+    const uint8_t index = stationListPage * STATIONS_PER_PAGE + row;
+    if (row < STATIONS_PER_PAGE && index < stationCount) {
       if (x >= UI_LEFT + 182) {
         deleteIndex = index;
         deleteConfirmation = true;
@@ -1045,14 +1450,22 @@ void handleStationTouch(int16_t x, int16_t y) {
         return;
       }
     }
-  } else if (pointInRect(x, y, UI_LEFT, 204, 101, 25)) {
+  } else if (pointInRect(x, y, UI_LEFT, 204, 28, 25)) {
+    if (stationListPage > 0) {
+      --stationListPage;
+    }
+  } else if (pointInRect(x, y, UI_LEFT + 30, 204, 28, 25)) {
+    if (stationListPage + 1 < stationPageCount()) {
+      ++stationListPage;
+    }
+  } else if (pointInRect(x, y, UI_LEFT + 94, 204, 62, 25)) {
     if (stationCount >= MAX_STATIONS) {
-      setStatus("Senderliste ist voll");
+      setStatus("Station list is full");
     } else {
       startStationEditor(true, stationCount);
       return;
     }
-  } else if (pointInRect(x, y, UI_LEFT + 109, 204, 101, 25)) {
+  } else if (pointInRect(x, y, UI_LEFT + 158, 204, 52, 25)) {
     currentScreen = Screen::Home;
   }
   markUiDirty();
@@ -1061,17 +1474,25 @@ void handleStationTouch(int16_t x, int16_t y) {
 void handleTouch(int16_t x, int16_t y) {
   switch (currentScreen) {
     case Screen::Home:
+      if (pointInRect(x, y, 0, 195, CAT_PANEL_WIDTH, 45)) {
+        setAudioSpectrum(!audioSpectrumEnabled);
+        return;
+      }
       handleHomeTouch(x, y);
       break;
     case Screen::Settings:
-      if (pointInRect(x, y, UI_LEFT, 43, UI_WIDTH, 42)) {
+      if (pointInRect(x, y, UI_LEFT, 37, UI_WIDTH, 30)) {
         currentScreen = Screen::Wifi;
-      } else if (pointInRect(x, y, UI_LEFT, 94, UI_WIDTH, 42)) {
+      } else if (pointInRect(x, y, UI_LEFT, 72, UI_WIDTH, 30)) {
         currentScreen = Screen::Stations;
         deleteConfirmation = false;
-      } else if (pointInRect(x, y, UI_LEFT, 145, UI_WIDTH, 42)) {
+      } else if (pointInRect(x, y, UI_LEFT, 107, UI_WIDTH, 30)) {
+        setAudioBoost(!audioBoost);
+      } else if (pointInRect(x, y, UI_LEFT, 142, UI_WIDTH, 30)) {
+        setAudioSpectrum(!audioSpectrumEnabled);
+      } else if (pointInRect(x, y, UI_LEFT, 208, UI_WIDTH, 27)) {
         currentScreen = Screen::Home;
-      } else if (pointInRect(x, y, UI_LEFT, 210, UI_WIDTH, 18)) {
+      } else if (pointInRect(x, y, UI_LEFT, 192, UI_WIDTH, 16)) {
         adjustVolumeFromTouch(x);
       }
       markUiDirty();
@@ -1122,14 +1543,24 @@ void audio_info(const char *info) {
 
 void audio_showstation(const char *info) {
   streamStation = info;
+  updateGenreAnimal();
   audioDirty = true;
   Serial.printf("station: %s\n", info);
 }
 
 void audio_showstreamtitle(const char *info) {
   streamTitle = info;
+  updateGenreAnimal();
   audioDirty = true;
   Serial.printf("stream title: %s\n", info);
+}
+
+void audio_eof_stream(const char *info) {
+  streamActive = false;
+  streamRestartPending = true;
+  streamRestartAt = millis();
+  setStatus("Stream ended");
+  Serial.printf("audio: stream ended (%s)\n", info);
 }
 
 void setup() {
@@ -1137,15 +1568,15 @@ void setup() {
   display.init();
   display.setRotation(1);
   display.fillScreen(TFT_BLACK);
-  catFrameBuffer.setColorDepth(8);
-  if (!catFrameBuffer.createSprite(FAT_CAT_PANEL_WIDTH, DISPLAY_HEIGHT)) {
-    Serial.printf("ERROR: could not allocate %u-byte cat frame buffer; "
+  screenFrameBuffer.setColorDepth(8);
+  if (!screenFrameBuffer.createSprite(DISPLAY_WIDTH, DISPLAY_HEIGHT)) {
+    Serial.printf("ERROR: could not allocate %u-byte screen frame buffer; "
                   "%u bytes of heap remain.\n",
-                  static_cast<unsigned>(FAT_CAT_PANEL_WIDTH * DISPLAY_HEIGHT),
+                  static_cast<unsigned>(DISPLAY_WIDTH * DISPLAY_HEIGHT),
                   static_cast<unsigned>(ESP.getFreeHeap()));
     display.fillScreen(TFT_RED);
     display.setTextColor(TFT_WHITE, TFT_RED);
-    display.drawCentreString("Katzenpuffer fehlt", DISPLAY_WIDTH / 2,
+    display.drawCentreString("Frame buffer unavailable", DISPLAY_WIDTH / 2,
                              DISPLAY_HEIGHT / 2, 2);
     while (true) {
       delay(1000);
@@ -1164,6 +1595,9 @@ void setup() {
   wifiSsid = preferences.getString("ssid", "");
   wifiPassword = preferences.getString("password", "");
   volume = min<uint8_t>(preferences.getUChar("volume", 10), 21);
+  audioBoost = preferences.getBool("boost", false);
+  audioSpectrumEnabled = preferences.getBool("spectrum", true);
+  setAudioSpectrumEnabled(audioSpectrumEnabled);
   selectedStation = preferences.getUChar("selected", 0);
   loadStations();
   if (selectedStation >= stationCount) {
@@ -1182,8 +1616,11 @@ void setup() {
   }
 
   radioAudio.forceMono(true);
+  const int8_t audioGain = audioBoost ? AUDIO_BOOST_DB : 0;
+  radioAudio.setTone(audioGain, audioGain, audioGain);
   radioAudio.setVolume(volume);
   WiFi.mode(WIFI_STA);
+  configTzTime(BERLIN_TIMEZONE, "pool.ntp.org", "time.google.com");
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
@@ -1196,8 +1633,9 @@ void setup() {
   if (!wifiSsid.isEmpty()) {
     startWifiConnection();
   } else {
-    statusMessage = "Wi-Fi einrichten";
+    statusMessage = "Set up Wi-Fi";
   }
+  lastFallbackPetChangeAt = millis();
   markUiDirty();
 }
 
@@ -1212,6 +1650,36 @@ void loop() {
   }
 
   const uint32_t now = millis();
+  if (streamRestartPending && WiFi.status() == WL_CONNECTED &&
+      stationCount > 0 &&
+      now - streamRestartAt >= STREAM_RETRY_DELAY_MS) {
+    Serial.println("audio: retrying ended stream.");
+    startStream();
+  }
+  if (currentGenreAnimal == nullptr &&
+      now - lastFallbackPetChangeAt >= RANDOM_PET_INTERVAL_MS) {
+    chooseDifferentFallbackPet();
+    lastFallbackPetChangeAt = now;
+  }
+  updatePetAnimation(now);
+  updateBubbleText(now);
+  if (currentScreen == Screen::Home &&
+      now - lastClockUpdateAt >= CLOCK_UPDATE_INTERVAL_MS) {
+    lastClockUpdateAt = now;
+    markUiDirty();
+  }
+  if (currentScreen == Screen::Home &&
+      now - lastBitrateUpdateAt >= BITRATE_UPDATE_INTERVAL_MS) {
+    lastBitrateUpdateAt = now;
+    const uint32_t bitrateKbps =
+        WiFi.status() == WL_CONNECTED && streamActive
+            ? (radioAudio.getBitRate() + 500) / 1000
+            : 0;
+    if (bitrateKbps != lastDisplayedBitrateKbps) {
+      lastDisplayedBitrateKbps = bitrateKbps;
+      markUiDirty();
+    }
+  }
   if (now - lastCatFrameAt >= CAT_FRAME_INTERVAL_MS) {
     lastCatFrameAt = now;
     if (uiDirty) {
