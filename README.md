@@ -86,6 +86,27 @@ default is automatically migrated to the new list. Station URLs must be direct
 
 ## Genre animals
 
+![Slideshow of all CYD PET Radio pets with their names and genres](./docs/pets.gif)
+
+The slideshow above shows all eleven pets with their names and genres. It is
+rendered from the drawing code by `scripts/render_pets.py` (requires Pillow)
+and shows the pets without outfits; the device display looks slightly
+different.
+
+| Pet | Animal | Genre |
+|-----|--------|-------|
+| Claudia | Cat | No genre (default) |
+| Poldi | Peacock | Pop |
+| Leopold | Lion | Rock |
+| Hoppe | Kangaroo | Hip-Hop |
+| Egon | Chameleon | Techno |
+| Ludwig | Swan | Classical |
+| Moritz | Cat | Jazz |
+| Siegfried | Rhino | Heavy Metal |
+| Willi | Sloth | Reggae |
+| Blitz | Horse | Country |
+| Hansi | Budgie | German Pop |
+
 The radio checks the configured station name and the station/title metadata
 provided by the stream for genre keywords. A match selects the corresponding
 dancing animal from `src/genres_animals.cpp`: peacock for Pop, lion for Rock,
