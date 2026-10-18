@@ -1,7 +1,10 @@
 #ifndef BUBBLE_TEXTS_H
 #define BUBBLE_TEXTS_H
 
-const char *const bubbleTexts[10][10] = {
+const char *const bubbleTexts[11][10] = {
+    {"Hi, I'm Claudia!", "Let's dance!", "So fabulous!", "Look at me!",
+     "Good vibes!", "Keep it groovy!", "Having fun!", "Shiny!", "Catchy!",
+     "10/10!"},
     {"Look at me!", "So fabulous!", "Work it!", "Glamour!", "Slay!",
      "Shiny!", "Uh lala!", "Star!", "Catchy!", "10/10!"},
     {"Make louder!", "Roar!", "Rock on!", "Hell yeah!", "Turn it up!",

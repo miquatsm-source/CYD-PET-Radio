@@ -1,0 +1,19 @@
+#pragma once
+
+#include <Arduino.h>
+#include <TFT_eSPI.h>
+
+#include "pet_animation.h"
+
+struct Pet {
+  const char *animalType;
+  const char *animalName;
+  int8_t drawingIndex;
+};
+
+constexpr uint8_t PET_COUNT = 11;
+
+extern const Pet petList[PET_COUNT];
+
+void drawPet(TFT_eSprite &frameBuffer, uint32_t now, const Pet &pet,
+             PetDance dance, PetOutfit outfit);

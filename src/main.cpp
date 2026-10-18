@@ -15,7 +15,7 @@
 #include "bubble_texts.h"
 #include "colors.h"
 #include "fat_cat.h"
-#include "genres_animals.h"
+#include "pets.h"
 #include "default_playlist.h"
 
 namespace {
@@ -56,6 +56,25 @@ constexpr uint8_t THEME_COLOR_COUNT = 5;
 constexpr uint8_t DEFAULT_THEME_COLOR = 1;
 constexpr uint8_t BUTTON_COLOR_COUNT = 5;
 constexpr uint8_t DEFAULT_BUTTON_COLOR = 0;
+#if defined(BOARD_FREENOVE_FNK0114L)
+constexpr uint8_t RGB_LED_RED_PIN = 22;
+constexpr uint8_t RGB_LED_GREEN_PIN = 16;
+constexpr uint8_t RGB_LED_BLUE_PIN = 17;
+constexpr uint8_t RGB_LED_RED_CHANNEL = 5;
+constexpr uint8_t RGB_LED_GREEN_CHANNEL = 6;
+constexpr uint8_t RGB_LED_BLUE_CHANNEL = 7;
+constexpr uint8_t RGB_LED_COLOR_COUNT = 5;
+constexpr uint32_t RGB_LED_PULSE_PERIOD_MS = 4000;
+constexpr uint32_t RGB_LED_UPDATE_INTERVAL_MS = 30;
+struct RgbColor {
+  uint8_t red;
+  uint8_t green;
+  uint8_t blue;
+};
+constexpr RgbColor RGB_LED_COLORS[RGB_LED_COLOR_COUNT] = {
+    {255, 36, 18}, {0, 190, 255}, {154, 62, 255}, {255, 132, 18},
+    {36, 255, 92}};
+#endif
 constexpr int16_t HOME_THEME_SWATCH_WIDTH = 36;
 constexpr int16_t HOME_THEME_SWATCH_HEIGHT = 16;
 constexpr int16_t HOME_THEME_SWATCH_GAP = 6;
@@ -86,6 +105,7 @@ struct TouchCalibration {
 enum class Screen : uint8_t {
   Home,
   Settings,
+  RgbLedSettings,
   Wifi,
   Stations,
   StationEditor,
@@ -127,6 +147,12 @@ uint8_t stationListPage = 0;
 uint8_t volume = 10;
 uint8_t themeColorIndex = DEFAULT_THEME_COLOR;
 uint8_t buttonColorIndex = DEFAULT_BUTTON_COLOR;
+#if defined(BOARD_FREENOVE_FNK0114L)
+uint8_t rgbLedColorIndex = 0;
+bool rgbLedEnabled = false;
+bool rgbLedPulseEnabled = false;
+uint32_t lastRgbLedUpdateAt = 0;
+#endif
 uint16_t backgroundColor = THEME_COLORS[DEFAULT_THEME_COLOR];
 uint8_t editorIndex = 0;
 uint8_t deleteIndex = 0;
@@ -167,9 +193,8 @@ bool audioDirty = false;
 bool displayReady = false;
 volatile uint8_t wifiDisconnectReason = 0;
 volatile bool wifiDisconnectReasonPending = false;
-const MusicGenreAnimal *currentGenreAnimal = nullptr;
-const MusicGenreAnimal *fallbackPet = nullptr;
-const MusicGenreAnimal *displayedPet = nullptr;
+uint8_t selectedPetIndex = 0;
+uint8_t displayedPetIndex = 0;
 uint32_t wifiConnectStartedAt = 0;
 uint32_t streamRestartAt = 0;
 uint32_t lastTouchAt = 0;
@@ -179,7 +204,7 @@ uint32_t nextDanceChangeAt = 0;
 uint32_t lastClockUpdateAt = 0;
 uint32_t lastBitrateUpdateAt = 0;
 uint32_t lastDisplayedBitrateKbps = UINT32_MAX;
-uint32_t lastFallbackPetChangeAt = 0;
+uint32_t lastPetChangeAt = 0;
 uint32_t lastBubbleShownAt = 0;
 uint32_t bubbleIntervalMs = MIN_BUBBLE_INTERVAL_MS;
 uint8_t bubblePetIndex = UINT8_MAX;
@@ -197,46 +222,17 @@ void updateScreenLayout();
 uint8_t stationPageCount();
 void showStationPageFor(uint8_t index);
 
-void updateGenreAnimal() {
-  char metadata[256];
-  const char *configuredStation =
-      stationCount > 0 && selectedStation < stationCount
-          ? stations[selectedStation].name
-          : "";
-  snprintf(metadata, sizeof(metadata), "%s %s %s", configuredStation,
-           streamStation.c_str(), streamTitle.c_str());
-
-  const MusicGenreAnimal *detected = detectMusicGenre(metadata);
-  if (detected != currentGenreAnimal) {
-    currentGenreAnimal = detected;
-    fallbackPet = nullptr;
-    lastFallbackPetChangeAt = millis();
-    if (detected == nullptr) {
-      Serial.println("Genre: no genre found in station or stream metadata.");
-    } else {
-      Serial.printf("Genre: %s; animal: %s (%s).\n", detected->genre,
-                    detected->animalType, detected->animalName);
-    }
-    audioDirty = true;
-  }
-}
-
-void chooseDifferentFallbackPet() {
-  uint8_t previousIndex = 5;
-  if (fallbackPet != nullptr) {
-    for (uint8_t i = 0; i < MUSIC_GENRE_COUNT; ++i) {
-      if (&genreList[i] == fallbackPet) {
-        previousIndex = i;
-        break;
-      }
-    }
-  }
-
-  uint8_t nextIndex = esp_random() % (MUSIC_GENRE_COUNT - 1);
-  if (nextIndex >= previousIndex) {
+void chooseDifferentPet() {
+  uint8_t nextIndex = esp_random() % (PET_COUNT - 1);
+  if (nextIndex >= selectedPetIndex) {
     ++nextIndex;
   }
-  fallbackPet = &genreList[nextIndex];
+  selectedPetIndex = nextIndex;
+}
+
+void chooseDifferentPet(uint32_t now) {
+  chooseDifferentPet();
+  lastPetChangeAt = now;
 }
 
 void chooseDifferentBubbleText() {
@@ -250,10 +246,6 @@ void chooseDifferentBubbleText() {
 uint32_t randomBubbleInterval() {
   return MIN_BUBBLE_INTERVAL_MS +
          esp_random() % (MAX_BUBBLE_INTERVAL_MS - MIN_BUBBLE_INTERVAL_MS + 1);
-}
-
-const MusicGenreAnimal *desiredPet() {
-  return currentGenreAnimal != nullptr ? currentGenreAnimal : fallbackPet;
 }
 
 PetDance randomDifferentDance(PetDance previous) {
@@ -271,9 +263,9 @@ uint32_t randomDanceDuration() {
 }
 
 void updatePetAnimation(uint32_t now) {
-  const MusicGenreAnimal *wantedPet = desiredPet();
+  const uint8_t wantedPetIndex = selectedPetIndex;
   if (!petAnimationInitialized) {
-    displayedPet = wantedPet;
+    displayedPetIndex = wantedPetIndex;
     petDance = static_cast<PetDance>(esp_random() % 3);
     petOutfit = static_cast<PetOutfit>(esp_random() % 4);
     petTransition = PetTransition::Entering;
@@ -285,7 +277,7 @@ void updatePetAnimation(uint32_t now) {
 
   if (petTransition == PetTransition::Exiting &&
       now - petTransitionStartedAt >= PET_TRANSITION_DURATION_MS) {
-    displayedPet = wantedPet;
+    displayedPetIndex = wantedPetIndex;
     petDance = static_cast<PetDance>(esp_random() % 3);
     petOutfit = static_cast<PetOutfit>(esp_random() % 4);
     petTransition = PetTransition::Entering;
@@ -294,12 +286,12 @@ void updatePetAnimation(uint32_t now) {
   } else if (petTransition == PetTransition::Entering &&
              now - petTransitionStartedAt >= PET_TRANSITION_DURATION_MS) {
     petTransition = PetTransition::Idle;
-    if (displayedPet != wantedPet) {
+    if (displayedPetIndex != wantedPetIndex) {
       petTransition = PetTransition::Exiting;
       petTransitionStartedAt = now;
     }
   } else if (petTransition == PetTransition::Idle) {
-    if (displayedPet != wantedPet) {
+    if (displayedPetIndex != wantedPetIndex) {
       petTransition = PetTransition::Exiting;
       petTransitionStartedAt = now;
     } else if (now >= nextDanceChangeAt) {
@@ -354,20 +346,8 @@ void shiftPetPanel(TFT_eSprite &frameBuffer, int16_t offset) {
 }
 
 void updateBubbleText(uint32_t now) {
-  const MusicGenreAnimal *pet =
-      currentGenreAnimal != nullptr ? currentGenreAnimal : fallbackPet;
-  uint8_t nextPetIndex = 5;
-  if (pet != nullptr) {
-    for (uint8_t i = 0; i < MUSIC_GENRE_COUNT; ++i) {
-      if (&genreList[i] == pet) {
-        nextPetIndex = i;
-        break;
-      }
-    }
-  }
-
-  if (nextPetIndex != bubblePetIndex) {
-    bubblePetIndex = nextPetIndex;
+  if (selectedPetIndex != bubblePetIndex) {
+    bubblePetIndex = selectedPetIndex;
     bubbleTextIndex = esp_random() % 10;
     bubbleVisible = true;
     lastBubbleShownAt = now;
@@ -407,18 +387,25 @@ void drawSpeechBubble(TFT_eSprite &frameBuffer, const char *text) {
 }
 
 void drawCatFrame(uint32_t now, bool pushFullFrame = false) {
-  if (displayedPet == nullptr) {
-    drawFatCat(screenFrameBuffer, now, "Claudia", petDance, petOutfit);
+  const Pet &pet = petList[displayedPetIndex];
+  if (pet.drawingIndex < 0) {
+    drawFatCat(screenFrameBuffer, now, pet.animalName, petDance, petOutfit);
   } else {
-    drawGenreAnimal(screenFrameBuffer, now, *displayedPet, petDance, petOutfit);
+    drawPet(screenFrameBuffer, now, pet, petDance, petOutfit);
   }
   if (bubbleVisible) {
     drawSpeechBubble(screenFrameBuffer,
                      bubbleTexts[bubblePetIndex][bubbleTextIndex]);
   }
   shiftPetPanel(screenFrameBuffer, petTransitionOffset(now));
-  drawAudioSpectrum(screenFrameBuffer, now, currentGenreAnimal, streamActive,
+  drawAudioSpectrum(screenFrameBuffer, now, streamActive,
                     audioSpectrumEnabled);
+  const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+  const String wifiLabel =
+      wifiConnected ? "Wi-Fi " + String(WiFi.RSSI()) + " dBm" : "Wi-Fi OFF";
+  screenFrameBuffer.setTextDatum(TL_DATUM);
+  screenFrameBuffer.setTextColor(wifiConnected ? SUCCESS : TEXT_MUTED, 0x0841);
+  screenFrameBuffer.drawString(wifiLabel, 2, 2, 1);
   if (pushFullFrame) {
     screenFrameBuffer.pushSprite(0, 0);
   } else {
@@ -637,45 +624,31 @@ void drawHome() {
   display.setTextDatum(TR_DATUM);
   display.setTextColor(primaryTextColor(), backgroundColor);
   display.drawString(clockText, UI_LEFT + UI_WIDTH, 2, 1);
-  const String genreText =
-      currentGenreAnimal == nullptr
-          ? "Genre: --"
-          : String("Genre: ") + currentGenreAnimal->genre;
-  display.setTextColor(TFT_CYAN, backgroundColor);
-  display.drawString(fittedText(genreText, 112, 1), UI_LEFT + UI_WIDTH, 14, 1);
 
   const bool connected = WiFi.status() == WL_CONNECTED;
-  display.fillCircle(UI_LEFT + 5, 43, 3, connected ? SUCCESS : ERROR_COLOUR);
-  const String wifiLabel =
-      connected ? "Wi-Fi connected " + String(WiFi.RSSI()) + " dBm"
-                : wifiStatusText();
-  drawText(fittedText(wifiLabel, UI_WIDTH - 10, 1), UI_LEFT + 13, 37, 1,
-           connected ? SUCCESS : TEXT_MUTED);
-  if (connected) {
-    const uint32_t bitrateKbps =
-        streamActive ? (radioAudio.getBitRate() + 500) / 1000 : 0;
-    display.setTextDatum(TR_DATUM);
-    display.setTextColor(TEXT_MUTED, backgroundColor);
-    display.drawString(bitrateKbps == 0
-                           ? "-- kbit/s"
-                           : String(bitrateKbps) + " kbit/s",
-                       UI_LEFT + UI_WIDTH, 45, 1);
-  }
+  const uint32_t bitrateKbps =
+      connected && streamActive ? (radioAudio.getBitRate() + 500) / 1000 : 0;
 
-  display.fillRoundRect(UI_LEFT, 53, UI_WIDTH, 45, 7, PANEL);
+  display.fillRoundRect(UI_LEFT, 36, UI_WIDTH, 62, 7, PANEL);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(primaryTextColor(), PANEL);
   const String stationName =
       stationCount == 0 ? "No stations" : stations[selectedStation].name;
-  display.drawString(fittedText(stationName, UI_WIDTH - 14), UI_LEFT + 7, 59,
+  display.drawString(fittedText(stationName, UI_WIDTH - 14), UI_LEFT + 7, 39,
                      2);
   display.setTextColor(TEXT_MUTED, PANEL);
   String subtitle = streamTitle.isEmpty()
                         ? (streamStation.isEmpty() ? statusMessage
                                                    : streamStation)
                         : streamTitle;
-  display.drawString(fittedText(subtitle, UI_WIDTH - 14, 1), UI_LEFT + 7, 82,
-                     1);
+  display.drawString(fittedText(subtitle, UI_WIDTH - 14, 2), UI_LEFT + 7, 58,
+                     2);
+  display.setTextDatum(TR_DATUM);
+  display.setTextColor(TEXT_MUTED, PANEL);
+  display.drawString(bitrateKbps == 0
+                         ? "-- kbit/s"
+                         : String(bitrateKbps) + " kbit/s",
+                     UI_LEFT + UI_WIDTH - 7, 83, 1);
 
   drawButton(UI_LEFT, 105, 49, 36, "|<", PANEL_LIGHT);
   drawButton(UI_LEFT + 55, 105, 100, 36,
@@ -688,7 +661,8 @@ void drawHome() {
   display.setTextDatum(TR_DATUM);
   display.drawString(String(volume * 100 / 21) + "%", UI_LEFT + UI_WIDTH,
                      151, 1);
-  display.fillRoundRect(UI_LEFT, 168, UI_WIDTH, 8, 4, PANEL_LIGHT);
+  display.fillRoundRect(UI_LEFT, 168, UI_WIDTH, 8, 4,
+                        BUTTON_COLORS[buttonColorIndex]);
   const int16_t sliderWidth =
       static_cast<int16_t>((UI_WIDTH - 4) * volume / 21);
   display.fillRoundRect(UI_LEFT + 2, 170, sliderWidth, 4, 2, ACCENT);
@@ -701,6 +675,10 @@ void drawHome() {
 void drawSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("SETTINGS");
+#if defined(BOARD_FREENOVE_FNK0114L)
+  drawButton(UI_LEFT + UI_WIDTH - 116, 4, 62, 23, "RGB LED",
+             PANEL_LIGHT, TFT_WHITE, 1);
+#endif
   drawButton(UI_LEFT + UI_WIDTH - 48, 4, 48, 23, "BACK", PANEL_LIGHT,
              TFT_WHITE, 1);
   const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
@@ -730,7 +708,8 @@ void drawSettings() {
   display.setTextDatum(TR_DATUM);
   display.drawString(String(volume * 100 / 21) + "%", UI_LEFT + UI_WIDTH,
                      147, 1);
-  display.fillRoundRect(UI_LEFT, 163, UI_WIDTH, 8, 4, PANEL_LIGHT);
+  display.fillRoundRect(UI_LEFT, 163, UI_WIDTH, 8, 4,
+                        BUTTON_COLORS[buttonColorIndex]);
   const int16_t sliderWidth =
       static_cast<int16_t>((UI_WIDTH - 4) * volume / 21);
   display.fillRoundRect(UI_LEFT + 2, 165, sliderWidth, 4, 2, ACCENT);
@@ -761,6 +740,129 @@ void drawSettings() {
         index == buttonColorIndex ? primaryTextColor() : 0x4208);
   }
 }
+
+#if defined(BOARD_FREENOVE_FNK0114L)
+void drawRgbLedSettings() {
+  TFT_eSPI &display = *renderTarget;
+  drawPanelHeader("RGB LED OPTIONS");
+  drawButton(UI_LEFT + UI_WIDTH - 48, 4, 48, 23, "BACK", PANEL_LIGHT,
+             TFT_WHITE, 1);
+  drawButton(UI_LEFT, 48, UI_WIDTH, 32,
+             String("LED: ") + (rgbLedEnabled ? "ON" : "OFF"),
+             PANEL_LIGHT, TFT_WHITE, 2);
+  drawButton(UI_LEFT, 88, UI_WIDTH, 32,
+             String("SLOW PULSE: ") + (rgbLedPulseEnabled ? "ON" : "OFF"),
+             PANEL_LIGHT, TFT_WHITE, 2);
+  display.setTextDatum(TL_DATUM);
+  display.setTextColor(primaryTextColor(), backgroundColor);
+  display.drawString("COLOR", UI_LEFT, 132, 1);
+
+  constexpr int16_t COLOR_BUTTON_WIDTH = 52;
+  constexpr int16_t COLOR_BUTTON_GAP = 7;
+  constexpr int16_t COLOR_BUTTON_HEIGHT = 38;
+  constexpr int16_t COLOR_BUTTON_Y = 150;
+  const int16_t colorsWidth =
+      RGB_LED_COLOR_COUNT * COLOR_BUTTON_WIDTH +
+      (RGB_LED_COLOR_COUNT - 1) * COLOR_BUTTON_GAP;
+  const int16_t colorsLeft = UI_LEFT + (UI_WIDTH - colorsWidth) / 2;
+  const char *colorLabels[RGB_LED_COLOR_COUNT] = {
+      "RED", "CYAN", "VIOLET", "AMBER", "GREEN"};
+  for (uint8_t index = 0; index < RGB_LED_COLOR_COUNT; ++index) {
+    const int16_t x =
+        colorsLeft + index * (COLOR_BUTTON_WIDTH + COLOR_BUTTON_GAP);
+    const RgbColor color = RGB_LED_COLORS[index];
+    const uint16_t color565 =
+        display.color565(color.red, color.green, color.blue);
+    display.fillRoundRect(x, COLOR_BUTTON_Y, COLOR_BUTTON_WIDTH,
+                          COLOR_BUTTON_HEIGHT, 5, color565);
+    display.drawRoundRect(
+        x - 1, COLOR_BUTTON_Y - 1, COLOR_BUTTON_WIDTH + 2,
+        COLOR_BUTTON_HEIGHT + 2, 6,
+        index == rgbLedColorIndex ? TFT_WHITE : 0x4208);
+    display.setTextDatum(MC_DATUM);
+    display.setTextColor(TFT_WHITE, color565);
+    display.drawString(colorLabels[index], x + COLOR_BUTTON_WIDTH / 2,
+                       COLOR_BUTTON_Y + COLOR_BUTTON_HEIGHT / 2, 1);
+  }
+}
+
+void setRgbLedOutput(uint8_t brightness) {
+  const RgbColor color = RGB_LED_COLORS[rgbLedColorIndex];
+  const uint32_t red = color.red * brightness / 255;
+  const uint32_t green = color.green * brightness / 255;
+  const uint32_t blue = color.blue * brightness / 255;
+  ledcWrite(RGB_LED_RED_CHANNEL, 255 - red);
+  ledcWrite(RGB_LED_GREEN_CHANNEL, 255 - green);
+  ledcWrite(RGB_LED_BLUE_CHANNEL, 255 - blue);
+}
+
+void initializeRgbLed() {
+  ledcSetup(RGB_LED_RED_CHANNEL, 5000, 8);
+  ledcSetup(RGB_LED_GREEN_CHANNEL, 5000, 8);
+  ledcSetup(RGB_LED_BLUE_CHANNEL, 5000, 8);
+  ledcAttachPin(RGB_LED_RED_PIN, RGB_LED_RED_CHANNEL);
+  ledcAttachPin(RGB_LED_GREEN_PIN, RGB_LED_GREEN_CHANNEL);
+  ledcAttachPin(RGB_LED_BLUE_PIN, RGB_LED_BLUE_CHANNEL);
+  setRgbLedOutput(0);
+}
+
+void updateRgbLed(uint32_t now) {
+  if (now - lastRgbLedUpdateAt < RGB_LED_UPDATE_INTERVAL_MS) {
+    return;
+  }
+  lastRgbLedUpdateAt = now;
+
+  if (!rgbLedEnabled) {
+    setRgbLedOutput(0);
+    return;
+  }
+  if (!rgbLedPulseEnabled) {
+    setRgbLedOutput(72);
+    return;
+  }
+
+  const uint32_t phase = now % RGB_LED_PULSE_PERIOD_MS;
+  const uint32_t halfPeriod = RGB_LED_PULSE_PERIOD_MS / 2;
+  const uint32_t distance = phase < halfPeriod ? phase : RGB_LED_PULSE_PERIOD_MS - phase;
+  const uint32_t ramp = distance * 255 / halfPeriod;
+  const uint8_t brightness =
+      static_cast<uint8_t>(16 + (ramp * ramp * 104) / (255 * 255));
+  setRgbLedOutput(brightness);
+}
+
+void setRgbLedEnabled(bool enabled) {
+  rgbLedEnabled = enabled;
+  if (preferences.putBool("rgbEnabled", rgbLedEnabled) == 0) {
+    Serial.println("ERROR: could not save RGB LED setting.");
+    setStatus("Could not save RGB LED setting");
+    return;
+  }
+  markUiDirty();
+}
+
+void setRgbLedPulseEnabled(bool enabled) {
+  rgbLedPulseEnabled = enabled;
+  if (preferences.putBool("rgbPulse", rgbLedPulseEnabled) == 0) {
+    Serial.println("ERROR: could not save RGB LED pulse setting.");
+    setStatus("Could not save RGB LED pulse setting");
+    return;
+  }
+  markUiDirty();
+}
+
+void setRgbLedColor(uint8_t index) {
+  if (index >= RGB_LED_COLOR_COUNT || index == rgbLedColorIndex) {
+    return;
+  }
+  rgbLedColorIndex = index;
+  if (preferences.putUChar("rgbColor", rgbLedColorIndex) == 0) {
+    Serial.println("ERROR: could not save RGB LED color.");
+    setStatus("Could not save RGB LED color");
+    return;
+  }
+  markUiDirty();
+}
+#endif
 
 void drawWifiSettings() {
   TFT_eSPI &display = *renderTarget;
@@ -829,8 +931,8 @@ void drawStations() {
     display.fillRoundRect(UI_LEFT, rowY, UI_WIDTH, 24, 5, fill);
     display.setTextDatum(ML_DATUM);
     display.setTextColor(primaryTextColor(), fill);
-    display.drawString(fittedText(stations[i].name, UI_WIDTH - 82, 1),
-                       UI_LEFT + 7, rowY + 12, 1);
+    display.drawString(fittedText(stations[i].name, UI_WIDTH - 82, 2),
+                       UI_LEFT + 7, rowY + 12, 2);
     display.setTextDatum(MC_DATUM);
     display.setTextColor(TEXT_MUTED, fill);
     display.drawString("E", UI_LEFT + UI_WIDTH - 48, rowY + 12, 1);
@@ -964,6 +1066,11 @@ void renderScreen() {
     case Screen::Settings:
       drawSettings();
       break;
+#if defined(BOARD_FREENOVE_FNK0114L)
+    case Screen::RgbLedSettings:
+      drawRgbLedSettings();
+      break;
+#endif
     case Screen::Wifi:
       drawWifiSettings();
       break;
@@ -1376,7 +1483,6 @@ void startStream() {
   streamTitle = "";
   streamStation = "";
   streamRestartPending = false;
-  updateGenreAnimal();
   radioAudio.stopSong();
   radioAudio.setVolume(volume);
   startAudioFadeIn();
@@ -1398,7 +1504,6 @@ void selectStation(uint8_t index) {
   selectedStation = index;
   streamTitle = "";
   streamStation = "";
-  updateGenreAnimal();
   if (preferences.putUChar("selected", selectedStation) == 0) {
     Serial.println("ERROR: could not save selected station.");
   }
@@ -1744,7 +1849,6 @@ void deleteStation(uint8_t index) {
     streamActive = false;
     streamTitle = "";
     streamStation = "";
-    updateGenreAnimal();
     radioAudio.stopSong();
   } else if (index < selectedStation) {
     --selectedStation;
@@ -1863,10 +1967,7 @@ void handleTouch(int16_t x, int16_t y) {
         return;
       }
       if (pointInRect(x, y, 0, 0, CAT_PANEL_WIDTH, 195)) {
-        if (currentGenreAnimal == nullptr) {
-          chooseDifferentFallbackPet();
-          lastFallbackPetChangeAt = millis();
-        }
+        chooseDifferentPet(millis());
         return;
       }
       handleHomeTouch(x, y);
@@ -1874,6 +1975,13 @@ void handleTouch(int16_t x, int16_t y) {
     case Screen::Settings:
     {
       const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
+#if defined(BOARD_FREENOVE_FNK0114L)
+      if (pointInRect(x, y, UI_LEFT + UI_WIDTH - 116, 4, 62, 23)) {
+        currentScreen = Screen::RgbLedSettings;
+        markUiDirty();
+        break;
+      }
+#endif
       if (pointInRect(x, y, UI_LEFT + UI_WIDTH - 48, 4, 48, 23)) {
         currentScreen = Screen::Home;
       } else if (pointInRect(x, y, UI_LEFT, 36, toggleWidth, 25)) {
@@ -1921,6 +2029,35 @@ void handleTouch(int16_t x, int16_t y) {
       markUiDirty();
       break;
     }
+#if defined(BOARD_FREENOVE_FNK0114L)
+    case Screen::RgbLedSettings: {
+      if (pointInRect(x, y, UI_LEFT + UI_WIDTH - 48, 4, 48, 23)) {
+        currentScreen = Screen::Settings;
+      } else if (pointInRect(x, y, UI_LEFT, 48, UI_WIDTH, 32)) {
+        setRgbLedEnabled(!rgbLedEnabled);
+      } else if (pointInRect(x, y, UI_LEFT, 88, UI_WIDTH, 32)) {
+        setRgbLedPulseEnabled(!rgbLedPulseEnabled);
+      } else if (pointInRect(x, y, UI_LEFT, 149, UI_WIDTH, 40)) {
+        constexpr int16_t COLOR_BUTTON_WIDTH = 52;
+        constexpr int16_t COLOR_BUTTON_GAP = 7;
+        const int16_t colorsWidth =
+            RGB_LED_COLOR_COUNT * COLOR_BUTTON_WIDTH +
+            (RGB_LED_COLOR_COUNT - 1) * COLOR_BUTTON_GAP;
+        const int16_t colorsLeft = UI_LEFT + (UI_WIDTH - colorsWidth) / 2;
+        for (uint8_t index = 0; index < RGB_LED_COLOR_COUNT; ++index) {
+          const int16_t colorX =
+              colorsLeft + index * (COLOR_BUTTON_WIDTH + COLOR_BUTTON_GAP);
+          if (pointInRect(x, y, colorX - 1, 149,
+                          COLOR_BUTTON_WIDTH + 2, 40)) {
+            setRgbLedColor(index);
+            break;
+          }
+        }
+      }
+      markUiDirty();
+      break;
+    }
+#endif
     case Screen::Wifi:
       if (pointInRect(x, y, UI_LEFT, 54, UI_WIDTH, 34)) {
         beginKeyboard(KeyboardTarget::Ssid);
@@ -1969,14 +2106,12 @@ void audio_info(const char *info) {
 
 void audio_showstation(const char *info) {
   streamStation = info;
-  updateGenreAnimal();
   audioDirty = true;
   Serial.printf("station: %s\n", info);
 }
 
 void audio_showstreamtitle(const char *info) {
   streamTitle = info;
-  updateGenreAnimal();
   audioDirty = true;
   Serial.printf("stream title: %s\n", info);
 }
@@ -2045,6 +2180,13 @@ void setup() {
   buttonColorIndex = min<uint8_t>(
       preferences.getUChar("buttonColor", DEFAULT_BUTTON_COLOR),
       BUTTON_COLOR_COUNT - 1);
+#if defined(BOARD_FREENOVE_FNK0114L)
+  rgbLedEnabled = preferences.getBool("rgbEnabled", false);
+  rgbLedPulseEnabled = preferences.getBool("rgbPulse", false);
+  rgbLedColorIndex = min<uint8_t>(preferences.getUChar("rgbColor", 0),
+                                  RGB_LED_COLOR_COUNT - 1);
+  initializeRgbLed();
+#endif
   display.fillScreen(backgroundColor);
   setAudioSpectrumEnabled(audioSpectrumEnabled);
   selectedStation = preferences.getUChar("selected", 0);
@@ -2099,7 +2241,7 @@ void setup() {
   } else {
     statusMessage = "Set up Wi-Fi";
   }
-  lastFallbackPetChangeAt = millis();
+  lastPetChangeAt = millis();
   markUiDirty();
 }
 
@@ -2114,16 +2256,17 @@ void loop() {
   }
 
   const uint32_t now = millis();
+#if defined(BOARD_FREENOVE_FNK0114L)
+  updateRgbLed(now);
+#endif
   if (streamRestartPending && WiFi.status() == WL_CONNECTED &&
       stationCount > 0 &&
       now - streamRestartAt >= STREAM_RETRY_DELAY_MS) {
     Serial.println("audio: retrying ended stream.");
     startStream();
   }
-  if (currentGenreAnimal == nullptr &&
-      now - lastFallbackPetChangeAt >= RANDOM_PET_INTERVAL_MS) {
-    chooseDifferentFallbackPet();
-    lastFallbackPetChangeAt = now;
+  if (now - lastPetChangeAt >= RANDOM_PET_INTERVAL_MS) {
+    chooseDifferentPet(now);
   }
   updatePetAnimation(now);
   updateBubbleText(now);

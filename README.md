@@ -31,6 +31,11 @@ Both boards use the ESP32's built-in DAC on GPIO 26 for mono speaker output.
 Wi-Fi credentials and the station list are saved in each board's non-volatile
 storage.
 
+The FNK0114L also has an optional rear RGB LED. Open **MENU > RGB LED** to
+enable it, choose one of five colors, and optionally turn on slow pulsing.
+These controls are available only in the FNK0114L firmware; the CYD's rear LED
+hardware and pin assignments are not confirmed as compatible.
+
 The `esp32dev-fast` environment uses an overclock and may be unstable on some
 CYD boards. Use `esp32dev` if the display shows artifacts.
 
@@ -41,9 +46,11 @@ later, open **MENU** and tap **RECALIBRATE TOUCHSCREEN**. Open **MENU > WI-FI** 
 enter the Wi-Fi network name and password with the touchscreen keyboard, then
 tap **CONNECT**. The radio starts its selected station once Wi-Fi connects.
 The home screen provides station navigation, play/pause, and a touchscreen
-volume slider. The top-right corner shows the detected genre and the current
-Europe/Berlin time and date. The clock synchronizes over the internet using
-NTP; until synchronization, it shows placeholder dashes.
+volume slider. The top-right corner shows the current Europe/Berlin time and
+date. Wi-Fi status and signal strength appear to the left of the **PET RADIO**
+heading. Station name and stream title appear below the heading, with bitrate
+under the title. The clock synchronizes over the internet using NTP; until
+synchronization, it shows placeholder dashes.
 
 Choose one of five dark background colors in **MENU**. The selection is saved
 across restarts, and interface text remains white for readability.
@@ -51,7 +58,8 @@ The **BUTTONS** swatches in the same menu independently choose the button fill:
 charcoal, deep blue, teal, plum, or bronze. These muted dark colors keep white
 labels readable on both supported displays. The choice applies to play/pause
 and all toggle buttons, regardless of whether a toggle is on or off, and is
-saved across restarts.
+saved across restarts. The volume slider track uses the selected button color
+as well.
 
 Enable optional dynamic audio compression in **MENU** to boost quieter audio
 while controlling loud peaks. This can make streaming volume more consistent,
@@ -96,46 +104,41 @@ existing personalized lists are preserved. The previous built-in three-station
 default is automatically migrated to the new list. Station URLs must be direct
 `http://` or `https://` MP3/AAC streams supported by the audio decoder.
 
-## Genre animals
+## Pets
 
-![Slideshow of all CYD PET Radio pets with their names and genres](./docs/pets.gif)
+![Slideshow of all CYD PET Radio pets](./docs/pets.gif)
 
-The slideshow above shows all eleven pets with their names and genres. Every pet except Moritz and Blitz has two looks that the radio picks by dance: Willi hangs from a branch or sits and waves in a rasta cap, Egon has animated spots or headphones with neon stripes, Hoppe wears a hoodie or headphones with a boombox, Siegfried plays a flying-V guitar or throws devil horns, Leopold is a singer with a microphone or a king with a crown and sceptre, Ludwig conducts in a top hat or plays the violin in a baroque wig, Poldi shows a full fan or plays the rock star, and Hansi wears a glitter jacket or folk costume. It is
+The slideshow above shows all eleven pets. Every pet except Moritz and Blitz
+has two looks that the radio picks by dance: Willi hangs from a branch or sits
+and waves in a rasta cap, Egon has animated spots or headphones with neon
+stripes, Hoppe wears a hoodie or headphones with a boombox, Siegfried plays a
+flying-V guitar or throws devil horns, Leopold is a singer with a microphone
+or a king with a crown and sceptre, Ludwig conducts in a top hat or plays the
+violin in a baroque wig, Poldi shows a full fan or plays the rock star, and
+Hansi wears a glitter jacket or folk costume. It is
 rendered from the drawing code by `scripts/render_pets.py` (requires Pillow)
 and shows the pets without outfits; the device display looks slightly
 different.
 
-| Pet | Animal | Genre |
-|-----|--------|-------|
-| Claudia | Cat | No genre (default) |
-| Poldi | Peacock | Pop |
-| Leopold | Lion | Rock |
-| Hoppe | Kangaroo | Hip-Hop |
-| Egon | Chameleon | Techno |
-| Ludwig | Swan | Classical |
-| Moritz | Cat | Jazz |
-| Siegfried | Rhino | Heavy Metal |
-| Willi | Sloth | Reggae |
-| Blitz | Horse | Country |
-| Hansi | Budgie | German Pop |
+| Pet | Animal |
+|-----|--------|
+| Claudia | Cat |
+| Poldi | Peacock |
+| Leopold | Lion |
+| Hoppe | Kangaroo |
+| Egon | Chameleon |
+| Ludwig | Swan |
+| Moritz | Cat |
+| Siegfried | Rhino |
+| Willi | Sloth |
+| Blitz | Horse |
+| Hansi | Budgie |
 
-The radio checks the configured station name and the station/title metadata
-provided by the stream for genre keywords. A match selects the corresponding
-dancing animal from `src/genres_animals.cpp`: peacock for Pop, lion for Rock,
-kangaroo for Hip-Hop, chameleon for Techno, swan for classical, cat for Jazz,
-rhino for Heavy Metal, sloth for Reggae, horse for Country, and budgie for
-German Pop. If the metadata contains no recognized genre keyword, the default
-dancing cat remains on screen. This is metadata-based matching, not acoustic
-music recognition; many streams do not include genre information in their
-station name or track titles.
-
-The default cat is named Claudia. Genre animals are named Poldi (Pop), Leopold
-(Rock), Hoppe (Hip-Hop), Egon (Techno), Ludwig (classical), Moritz (Jazz),
-Siegfried (Heavy Metal), Willi (Reggae), Blitz (Country), and Hansi
-(German Pop). The animal's name appears at the top of the left panel. If no genre
-can be identified, Claudia is shown first and a different randomly selected
-pet appears every 30 seconds until genre metadata is available.
-Each pet also displays a random genre-themed English quip in a speech bubble.
+Claudia is shown first. The pets then change to a different random pet every
+30 seconds; tapping the pet panel advances to another pet immediately. Each
+pet's name appears above the animation, and the illustrated animals also show
+their animal type below it. Each pet displays a random English quip in a
+speech bubble.
 Each bubble stays visible for 2 seconds, with a randomized 5-to-15-second
 interval between appearances.
 Pets use three randomly selected dance animations that change during playback.

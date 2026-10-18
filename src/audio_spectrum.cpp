@@ -189,8 +189,7 @@ void audio_process_i2s(uint32_t *sample, bool *continueI2S) {
 }
 
 void drawAudioSpectrum(TFT_eSprite &frameBuffer, uint32_t now,
-                       const MusicGenreAnimal *animal, bool streamActive,
-                       bool enabled) {
+                       bool streamActive, bool enabled) {
   frameBuffer.fillRect(0, 195, FAT_CAT_PANEL_WIDTH, 45, 0x0841);
   frameBuffer.setTextDatum(MC_DATUM);
   frameBuffer.setTextColor(TFT_CYAN, 0x0841);
@@ -214,11 +213,6 @@ void drawAudioSpectrum(TFT_eSprite &frameBuffer, uint32_t now,
     for (uint8_t band = 0; band < SPECTRUM_BANDS; ++band) {
       targetHeights[band] = 0;
     }
-  }
-
-  if (animal != nullptr) {
-    frameBuffer.drawString(String(animal->genre) + " " + animal->animalName,
-                           FAT_CAT_PANEL_WIDTH / 2, 201, 1);
   }
 
   constexpr int16_t BAR_WIDTH = 7;

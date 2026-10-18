@@ -1,102 +1,22 @@
-#include <ctype.h>
 #include <math.h>
-#include <string.h>
 
 #include "fat_cat.h"
-#include "genres_animals.h"
+#include "pets.h"
 
 namespace {
 
-enum AnimalIndex : uint8_t {
-  PopAnimal,
-  RockAnimal,
-  HipHopAnimal,
-  TechnoAnimal,
-  ClassicalAnimal,
-  JazzAnimal,
-  MetalAnimal,
-  ReggaeAnimal,
-  CountryAnimal,
-  SchlagerAnimal
+enum PetDrawingIndex : uint8_t {
+  PeacockPet,
+  LionPet,
+  KangarooPet,
+  ChameleonPet,
+  SwanPet,
+  MoritzPet,
+  RhinoPet,
+  WilliPet,
+  BlitzPet,
+  HansiPet
 };
-
-struct GenreKeyword {
-  uint8_t animalIndex;
-  const char *keyword;
-};
-
-const GenreKeyword GENRE_KEYWORDS[] = {
-    {MetalAnimal, "heavy metal"}, {MetalAnimal, "metalcore"},
-    {MetalAnimal, "death metal"}, {MetalAnimal, "black metal"},
-    {MetalAnimal, "thrash"},      {MetalAnimal, "metal"},
-    {ReggaeAnimal, "dancehall"},  {ReggaeAnimal, "reggae"},
-    {ReggaeAnimal, "ska"},        {ReggaeAnimal, "dub"},
-    {CountryAnimal, "bluegrass"}, {CountryAnimal, "country"},
-    {CountryAnimal, "americana"}, {SchlagerAnimal, "volksmusik"},
-    {SchlagerAnimal, "schlager"}, {ClassicalAnimal, "classical music"},
-    {ClassicalAnimal, "classical"}, {ClassicalAnimal, "klassik"},
-    {ClassicalAnimal, "orchestra"},  {ClassicalAnimal, "orchestral"},
-    {ClassicalAnimal, "symphony"},   {ClassicalAnimal, "sinfonie"},
-    {HipHopAnimal, "hip hop"},       {HipHopAnimal, "hiphop"},
-    {HipHopAnimal, "rap"},           {HipHopAnimal, "trap"},
-    {TechnoAnimal, "drum and bass"}, {TechnoAnimal, "dance music"},
-    {TechnoAnimal, "techno"},        {TechnoAnimal, "electronic"},
-    {TechnoAnimal, "house"},         {TechnoAnimal, "edm"},
-    {TechnoAnimal, "trance"},        {TechnoAnimal, "electro"},
-    {JazzAnimal, "bebop"},           {JazzAnimal, "jazz"},
-    {JazzAnimal, "swing"},           {RockAnimal, "classic rock"},
-    {RockAnimal, "hard rock"},       {RockAnimal, "alternative rock"},
-    {RockAnimal, "indie rock"},      {RockAnimal, "rock"},
-    {PopAnimal, "dance pop"},        {PopAnimal, "top 40"},
-    {PopAnimal, "k pop"},            {PopAnimal, "pop"},
-};
-
-bool normalizeMetadata(const char *source, char *normalized,
-                      size_t bufferSize) {
-  if (source == nullptr || bufferSize < 3) {
-    return false;
-  }
-
-  size_t output = 0;
-  normalized[output++] = ' ';
-  bool previousWasSpace = true;
-  for (size_t input = 0; source[input] != '\0' && output < bufferSize - 2;
-       ++input) {
-    const unsigned char character = static_cast<unsigned char>(source[input]);
-    if (character < 128 && isalnum(character)) {
-      normalized[output++] = static_cast<char>(tolower(character));
-      previousWasSpace = false;
-    } else if (!previousWasSpace) {
-      normalized[output++] = ' ';
-      previousWasSpace = true;
-    }
-  }
-  if (!previousWasSpace) {
-    normalized[output++] = ' ';
-  }
-  normalized[output] = '\0';
-  return output > 2;
-}
-
-bool containsKeyword(const char *normalized, const char *keyword) {
-  char normalizedKeyword[32];
-  if (!normalizeMetadata(keyword, normalizedKeyword,
-                         sizeof(normalizedKeyword))) {
-    return false;
-  }
-
-  const char *phrase = normalizedKeyword + 1;
-  const size_t phraseLength = strlen(phrase) - 1;
-  const char *match = normalized;
-  while ((match = strstr(match, phrase)) != nullptr) {
-    if (match > normalized && match[-1] == ' ' &&
-        match[phraseLength] == ' ') {
-      return true;
-    }
-    ++match;
-  }
-  return false;
-}
 
 void drawFrame(TFT_eSprite &frameBuffer, const char *petName) {
   frameBuffer.fillRect(0, 0, FAT_CAT_PANEL_WIDTH, 193, 0x0841);
@@ -802,35 +722,35 @@ void drawAnimal(TFT_eSprite &frame, uint8_t index, int16_t bob,
   const uint16_t shadow = 0x6B4D;
 
   switch (index) {
-    case PopAnimal: {
+    case PeacockPet: {
       drawPeacock(frame, bob, pose, dance == PetDance::Sway);
       break;
     }
-    case RockAnimal: {
+    case LionPet: {
       drawLion(frame, bob, pose, dance == PetDance::Sway);
       break;
     }
-    case HipHopAnimal: {
+    case KangarooPet: {
       drawKangaroo(frame, bob, pose, dance == PetDance::Sway);
       break;
     }
-    case TechnoAnimal: {
+    case ChameleonPet: {
       drawChameleon(frame, bob, pose, dance == PetDance::Sway);
       break;
     }
-    case ClassicalAnimal: {
+    case SwanPet: {
       drawSwan(frame, bob, pose, dance == PetDance::Sway);
       break;
     }
-    case JazzAnimal: {
+    case MoritzPet: {
       drawMoritz(frame, bob, pose);
       break;
     }
-    case MetalAnimal: {
+    case RhinoPet: {
       drawRhino(frame, bob, pose, dance == PetDance::Sway);
       break;
     }
-    case ReggaeAnimal: {
+    case WilliPet: {
       if (dance == PetDance::Sway) {
         drawWilliHanging(frame, sway[pose] * 2, bob, pose);
       } else {
@@ -838,11 +758,11 @@ void drawAnimal(TFT_eSprite &frame, uint8_t index, int16_t bob,
       }
       break;
     }
-    case CountryAnimal: {
+    case BlitzPet: {
       drawBlitz(frame, bob, pose);
       break;
     }
-    case SchlagerAnimal: {
+    case HansiPet: {
       drawBudgie(frame, bob, pose, dance == PetDance::Sway);
       break;
     }
@@ -860,44 +780,24 @@ void drawAnimal(TFT_eSprite &frame, uint8_t index, int16_t bob,
   }
 }
 
-void drawLabels(TFT_eSprite &frame, const MusicGenreAnimal &animal) {
+void drawLabels(TFT_eSprite &frame, const Pet &pet) {
   frame.fillRect(0, 198, FAT_CAT_PANEL_WIDTH, 42, 0x0841);
   frame.setTextDatum(MC_DATUM);
   frame.setTextColor(TFT_CYAN, 0x0841);
-  frame.drawString(animal.genre, 48, 207, 1);
   frame.setTextColor(TFT_WHITE, 0x0841);
-  frame.drawString(animal.animalType, 29, 224, 1);
-  frame.drawString(animal.animalName, 70, 224, 1);
+  frame.drawString(pet.animalType, 29, 218, 1);
+  frame.drawString(pet.animalName, 70, 218, 1);
 }
 
 }  // namespace
 
-const MusicGenreAnimal *detectMusicGenre(const char *metadata) {
-  char normalized[256];
-  if (!normalizeMetadata(metadata, normalized, sizeof(normalized))) {
-    return nullptr;
-  }
-
-  for (const GenreKeyword &entry : GENRE_KEYWORDS) {
-    if (containsKeyword(normalized, entry.keyword)) {
-      return &genreList[entry.animalIndex];
-    }
-  }
-  return nullptr;
-}
-
-void drawGenreAnimal(TFT_eSprite &frameBuffer, uint32_t now,
-                     const MusicGenreAnimal &animal, PetDance dance,
-                     PetOutfit outfit) {
-  uint8_t index = 0;
-  while (index < MUSIC_GENRE_COUNT && &genreList[index] != &animal) {
-    ++index;
-  }
-  if (index >= MUSIC_GENRE_COUNT) {
+void drawPet(TFT_eSprite &frameBuffer, uint32_t now, const Pet &pet,
+             PetDance dance, PetOutfit outfit) {
+  if (pet.drawingIndex < 0) {
     return;
   }
 
-  drawFrame(frameBuffer, animal.animalName);
+  drawFrame(frameBuffer, pet.animalName);
   const uint8_t pose = (now / FAT_CAT_FRAME_INTERVAL_MS) % 12;
   static const int8_t bounce[] = {0, -2, -5, -8, -10, -8,
                                   -5, -2, 0, 2, 1, 0};
@@ -907,7 +807,8 @@ void drawGenreAnimal(TFT_eSprite &frameBuffer, uint32_t now,
   const int16_t bob = dance == PetDance::Sway
                           ? sway[pose]
                           : dance == PetDance::Hop ? hops[pose] : bounce[pose];
+  const uint8_t index = static_cast<uint8_t>(pet.drawingIndex);
   drawAnimal(frameBuffer, index, bob, dance, pose);
   drawPetClothing(frameBuffer, index, outfit, bob);
-  drawLabels(frameBuffer, animal);
+  drawLabels(frameBuffer, pet);
 }
