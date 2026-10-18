@@ -39,13 +39,10 @@ void drawFatCat(TFT_eSprite &frameBuffer, uint32_t now, const char *petName,
   frameBuffer.fillRect(0, 0, FAT_CAT_PANEL_WIDTH, 195, PANEL_COLOUR);
   frameBuffer.drawFastHLine(0, 193, FAT_CAT_PANEL_WIDTH, 0x3186);
   frameBuffer.fillCircle(15, 44, 1, TFT_YELLOW);
-  frameBuffer.fillCircle(79, 30, 1, TFT_CYAN);
   frameBuffer.fillCircle(77, 105, 1, TFT_YELLOW);
   frameBuffer.setTextDatum(MC_DATUM);
   frameBuffer.setTextColor(TFT_CYAN, PANEL_COLOUR);
   frameBuffer.drawString(petName, 48, 18, 2);
-  frameBuffer.setTextColor(0xAD55, PANEL_COLOUR);
-  frameBuffer.drawString("RADIO", 48, 35, 1);
 
   frameBuffer.drawLine(68, bodyY + 24, 81, bodyY + 17 + bob / 2, FUR_SHADOW);
   frameBuffer.drawLine(81, bodyY + 17 + bob / 2, 86, bodyY + 10 + bob / 2,

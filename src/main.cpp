@@ -22,8 +22,10 @@ namespace {
 constexpr int16_t DISPLAY_WIDTH = 320;
 constexpr int16_t DISPLAY_HEIGHT = 240;
 constexpr int16_t CAT_PANEL_WIDTH = FAT_CAT_PANEL_WIDTH;
-constexpr int16_t UI_LEFT = 103;
-constexpr int16_t UI_WIDTH = 210;
+constexpr int16_t HOME_UI_LEFT = 103;
+constexpr int16_t HOME_UI_WIDTH = 210;
+constexpr int16_t MENU_UI_LEFT = 12;
+constexpr int16_t MENU_UI_WIDTH = DISPLAY_WIDTH - 2 * MENU_UI_LEFT;
 constexpr uint8_t MAX_STATIONS = 15;
 constexpr uint8_t STATIONS_PER_PAGE = 5;
 constexpr uint8_t STATION_NAME_SIZE = 32;
@@ -49,9 +51,12 @@ constexpr uint16_t PANEL_LIGHT = 0x2945;
 constexpr uint16_t ACCENT = 0x05BF;
 constexpr uint8_t THEME_COLOR_COUNT = 5;
 constexpr uint8_t DEFAULT_THEME_COLOR = 1;
-constexpr int16_t THEME_SWATCH_WIDTH = 36;
-constexpr int16_t THEME_SWATCH_HEIGHT = 16;
-constexpr int16_t THEME_SWATCH_GAP = 6;
+constexpr int16_t HOME_THEME_SWATCH_WIDTH = 36;
+constexpr int16_t HOME_THEME_SWATCH_HEIGHT = 16;
+constexpr int16_t HOME_THEME_SWATCH_GAP = 6;
+constexpr int16_t MENU_THEME_SWATCH_WIDTH = 50;
+constexpr int16_t MENU_THEME_SWATCH_HEIGHT = 20;
+constexpr int16_t MENU_THEME_SWATCH_GAP = 8;
 constexpr uint16_t THEME_COLORS[THEME_COLOR_COUNT] = {
     COLOR_DARK_BLUE, COLOR_DARK_GREY, COLOR_DARK_GREEN, COLOR_DARK_RED,
     COLOR_DARK_SLATE};
@@ -97,6 +102,11 @@ TFT_eSPI display;
 // Composite the UI and cat before pushing one complete frame to the TFT.
 TFT_eSprite screenFrameBuffer(&display);
 TFT_eSPI *renderTarget = &display;
+int16_t UI_LEFT = HOME_UI_LEFT;
+int16_t UI_WIDTH = HOME_UI_WIDTH;
+int16_t themeSwatchWidth = HOME_THEME_SWATCH_WIDTH;
+int16_t themeSwatchHeight = HOME_THEME_SWATCH_HEIGHT;
+int16_t themeSwatchGap = HOME_THEME_SWATCH_GAP;
 SPIClass touchSPI(HSPI);
 XPT2046_Touchscreen touch(33, 36);
 Preferences preferences;
@@ -169,6 +179,7 @@ PetOutfit petOutfit = PetOutfit::Tie;
 
 void startWifiConnection();
 void markUiDirty();
+void updateScreenLayout();
 uint8_t stationPageCount();
 void showStationPageFor(uint8_t index);
 
@@ -447,16 +458,74 @@ String keyboardRow(uint8_t row) {
   return letterRows[row];
 }
 
+bool wideKeyboardLayout() {
+  return UI_WIDTH == MENU_UI_WIDTH;
+}
+
+int16_t keyboardKeyGap() {
+  return wideKeyboardLayout() ? 4 : 1;
+}
+
+int16_t keyboardKeyHeight() {
+  return wideKeyboardLayout() ? 32 : 25;
+}
+
+int16_t keyboardRowY(uint8_t row) {
+  return wideKeyboardLayout() ? 67 + row * 37 : 66 + row * 29;
+}
+
+int16_t keyboardKeyWidth(const String &keys) {
+  const int16_t gap = keyboardKeyGap();
+  const int16_t availableWidth = UI_WIDTH - (keys.length() - 1) * gap;
+  return min<int16_t>(wideKeyboardLayout() ? 48 : 32,
+                      availableWidth / keys.length());
+}
+
+void keyboardControlBounds(uint8_t index, int16_t &x, int16_t &width) {
+  if (wideKeyboardLayout()) {
+    constexpr int16_t controlWidths[] = {56, 60, 90, 54};
+    const int16_t controlsWidth = 56 + 6 + 60 + 6 + 90 + 6 + 54;
+    const int16_t controlsLeft = UI_LEFT + (UI_WIDTH - controlsWidth) / 2;
+    x = controlsLeft;
+    for (uint8_t i = 0; i < index; ++i) {
+      x += controlWidths[i] + 6;
+    }
+    width = controlWidths[index];
+    return;
+  }
+
+  constexpr int16_t controlLefts[] = {0, 43, 95, 165};
+  constexpr int16_t controlWidths[] = {39, 48, 66, 45};
+  x = UI_LEFT + controlLefts[index];
+  width = controlWidths[index];
+}
+
 uint16_t primaryTextColor() {
   return TFT_WHITE;
 }
 
 int16_t themeSwatchX(uint8_t index) {
-  constexpr int16_t paletteWidth =
-      THEME_COLOR_COUNT * THEME_SWATCH_WIDTH +
-      (THEME_COLOR_COUNT - 1) * THEME_SWATCH_GAP;
+  const int16_t paletteWidth =
+      THEME_COLOR_COUNT * themeSwatchWidth +
+      (THEME_COLOR_COUNT - 1) * themeSwatchGap;
   return UI_LEFT + (UI_WIDTH - paletteWidth) / 2 +
-         index * (THEME_SWATCH_WIDTH + THEME_SWATCH_GAP);
+         index * (themeSwatchWidth + themeSwatchGap);
+}
+
+void updateScreenLayout() {
+  if (currentScreen == Screen::Home) {
+    UI_LEFT = HOME_UI_LEFT;
+    UI_WIDTH = HOME_UI_WIDTH;
+    themeSwatchWidth = HOME_THEME_SWATCH_WIDTH;
+    themeSwatchHeight = HOME_THEME_SWATCH_HEIGHT;
+    themeSwatchGap = HOME_THEME_SWATCH_GAP;
+    return;
+  }
+  UI_LEFT = MENU_UI_LEFT;
+  UI_WIDTH = MENU_UI_WIDTH;
+  themeSwatchWidth = MENU_THEME_SWATCH_WIDTH;
+  themeSwatchHeight = MENU_THEME_SWATCH_HEIGHT;
+  themeSwatchGap = MENU_THEME_SWATCH_GAP;
 }
 
 void setThemeColor(uint8_t index) {
@@ -496,7 +565,9 @@ void drawButton(int16_t x, int16_t y, int16_t width, int16_t height,
 
 void drawPanelHeader(const String &title) {
   TFT_eSPI &display = *renderTarget;
-  display.fillRect(CAT_PANEL_WIDTH, 0, DISPLAY_WIDTH - CAT_PANEL_WIDTH,
+  const int16_t panelLeft =
+      currentScreen == Screen::Home ? CAT_PANEL_WIDTH : 0;
+  display.fillRect(panelLeft, 0, DISPLAY_WIDTH - panelLeft,
                    DISPLAY_HEIGHT, backgroundColor);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TFT_CYAN, backgroundColor);
@@ -521,11 +592,11 @@ void drawHome() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("PET RADIO");
   struct tm localTime {};
-  char clockText[20] = "--.-- --:--";
+  char clockText[24] = "--.--.---- --:--";
   if (getLocalTime(&localTime, 0)) {
-    snprintf(clockText, sizeof(clockText), "%02d.%02d %02d:%02d",
-             localTime.tm_mday, localTime.tm_mon + 1, localTime.tm_hour,
-             localTime.tm_min);
+    snprintf(clockText, sizeof(clockText), "%02d.%02d.%04d %02d:%02d",
+             localTime.tm_mday, localTime.tm_mon + 1,
+             localTime.tm_year + 1900, localTime.tm_hour, localTime.tm_min);
   }
   display.setTextDatum(TR_DATUM);
   display.setTextColor(primaryTextColor(), backgroundColor);
@@ -539,8 +610,11 @@ void drawHome() {
 
   const bool connected = WiFi.status() == WL_CONNECTED;
   display.fillCircle(UI_LEFT + 5, 43, 3, connected ? SUCCESS : ERROR_COLOUR);
-  drawText(connected ? "Wi-Fi connected" : wifiStatusText(), UI_LEFT + 13, 37,
-           1, connected ? SUCCESS : TEXT_MUTED);
+  const String wifiLabel =
+      connected ? "Wi-Fi connected " + String(WiFi.RSSI()) + " dBm"
+                : wifiStatusText();
+  drawText(fittedText(wifiLabel, UI_WIDTH - 10, 1), UI_LEFT + 13, 37, 1,
+           connected ? SUCCESS : TEXT_MUTED);
   if (connected) {
     const uint32_t bitrateKbps =
         streamActive ? (radioAudio.getBitRate() + 500) / 1000 : 0;
@@ -549,7 +623,7 @@ void drawHome() {
     display.drawString(bitrateKbps == 0
                            ? "-- kbit/s"
                            : String(bitrateKbps) + " kbit/s",
-                       UI_LEFT + UI_WIDTH, 37, 1);
+                       UI_LEFT + UI_WIDTH, 45, 1);
   }
 
   display.fillRoundRect(UI_LEFT, 53, UI_WIDTH, 45, 7, PANEL);
@@ -594,10 +668,11 @@ void drawSettings() {
   drawPanelHeader("SETTINGS");
   drawButton(UI_LEFT, 36, UI_WIDTH, 25, "WI-FI", PANEL_LIGHT);
   drawButton(UI_LEFT, 63, UI_WIDTH, 25, "STATION LIST", PANEL_LIGHT);
-  drawButton(UI_LEFT, 89, 102, 24,
+  const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
+  drawButton(UI_LEFT, 89, toggleWidth, 24,
              String("BOOST +6: ") + (audioBoost ? "ON" : "OFF"),
              audioBoost ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 108, 89, 102, 24,
+  drawButton(UI_LEFT + toggleWidth + 6, 89, toggleWidth, 24,
              String("SPECTRUM: ") + (audioSpectrumEnabled ? "ON" : "OFF"),
              audioSpectrumEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
   drawButton(UI_LEFT, 115, UI_WIDTH, 24,
@@ -620,11 +695,11 @@ void drawSettings() {
   constexpr int16_t swatchY = 188;
   for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
     const int16_t swatchX = themeSwatchX(index);
-    display.fillRoundRect(swatchX, swatchY, THEME_SWATCH_WIDTH,
-                          THEME_SWATCH_HEIGHT, 3, THEME_COLORS[index]);
+    display.fillRoundRect(swatchX, swatchY, themeSwatchWidth,
+                          themeSwatchHeight, 4, THEME_COLORS[index]);
     display.drawRoundRect(
-        swatchX - 1, swatchY - 1, THEME_SWATCH_WIDTH + 2,
-        THEME_SWATCH_HEIGHT + 2, 4,
+        swatchX - 1, swatchY - 1, themeSwatchWidth + 2,
+        themeSwatchHeight + 2, 5,
         index == themeColorIndex ? primaryTextColor() : 0x4208);
   }
   drawButton(UI_LEFT, 213, UI_WIDTH, 23, "BACK", PANEL_LIGHT, TFT_WHITE, 1);
@@ -652,10 +727,11 @@ void drawWifiSettings() {
   drawButton(UI_LEFT, 151, UI_WIDTH, 18,
              String("SHOW PASSWORD: ") + (showWifiPassword ? "ON" : "OFF"),
              showWifiPassword ? 0x2147 : PANEL, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 176, 101, 32, "CONNECT",
+  const int16_t actionWidth = (UI_WIDTH - 8) / 2;
+  drawButton(UI_LEFT, 176, actionWidth, 32, "CONNECT",
              wifiConnecting ? 0x3186 : ACCENT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 109, 176, 101, 32, "BACK", PANEL_LIGHT, TFT_WHITE,
-             1);
+  drawButton(UI_LEFT + actionWidth + 8, 176, actionWidth, 32, "BACK",
+             PANEL_LIGHT, TFT_WHITE, 1);
   drawText(fittedText(wifiStatusText(), UI_WIDTH, 1), UI_LEFT, 216, 1,
            WiFi.status() == WL_CONNECTED ? SUCCESS : TEXT_MUTED);
 }
@@ -683,8 +759,8 @@ void drawStations() {
     display.drawString("Delete station?", 208, 101, 2);
     display.drawString(
         fittedText(stations[deleteIndex].name, 170, 1), 208, 124, 1);
-    drawButton(UI_LEFT + 14, 136, 88, 25, "CANCEL", PANEL, TFT_WHITE, 1);
-    drawButton(UI_LEFT + 108, 136, 88, 25, "DELETE", ERROR_COLOUR,
+    drawButton(UI_LEFT + 14, 136, 127, 25, "CANCEL", PANEL, TFT_WHITE, 1);
+    drawButton(UI_LEFT + 147, 136, 127, 25, "DELETE", ERROR_COLOUR,
                TFT_WHITE, 1);
     return;
   }
@@ -696,21 +772,24 @@ void drawStations() {
     display.fillRoundRect(UI_LEFT, rowY, UI_WIDTH, 24, 5, fill);
     display.setTextDatum(ML_DATUM);
     display.setTextColor(primaryTextColor(), fill);
-    display.drawString(fittedText(stations[i].name, 130, 1), UI_LEFT + 7,
-                       rowY + 12, 1);
+    display.drawString(fittedText(stations[i].name, UI_WIDTH - 82, 1),
+                       UI_LEFT + 7, rowY + 12, 1);
     display.setTextDatum(MC_DATUM);
     display.setTextColor(TEXT_MUTED, fill);
-    display.drawString("E", UI_LEFT + 165, rowY + 12, 1);
-    display.drawString("x", UI_LEFT + 195, rowY + 12, 2);
+    display.drawString("E", UI_LEFT + UI_WIDTH - 48, rowY + 12, 1);
+    display.drawString("x", UI_LEFT + UI_WIDTH - 17, rowY + 12, 2);
   }
-  drawButton(UI_LEFT, 204, 28, 25, "<", PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 30, 204, 28, 25, ">", PANEL_LIGHT, TFT_WHITE, 1);
+  const int16_t controlsWidth = 36 + 4 + 36 + 4 + 52 + 4 + 100 + 4 + 52;
+  const int16_t controlsLeft = UI_LEFT + (UI_WIDTH - controlsWidth) / 2;
+  drawButton(controlsLeft, 204, 36, 25, "<", PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(controlsLeft + 40, 204, 36, 25, ">", PANEL_LIGHT, TFT_WHITE, 1);
   display.setTextDatum(MC_DATUM);
   display.setTextColor(primaryTextColor(), backgroundColor);
   display.drawString(String(stationListPage + 1) + "/" + String(pageCount),
-                     UI_LEFT + 75, 216, 1);
-  drawButton(UI_LEFT + 94, 204, 62, 25, "+ STATION", ACCENT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 158, 204, 52, 25, "BACK", PANEL_LIGHT, TFT_WHITE,
+                     controlsLeft + 104, 216, 1);
+  drawButton(controlsLeft + 132, 204, 100, 25, "+ STATION", ACCENT,
+             TFT_WHITE, 1);
+  drawButton(controlsLeft + 236, 204, 52, 25, "BACK", PANEL_LIGHT, TFT_WHITE,
              1);
 }
 
@@ -726,9 +805,10 @@ void drawStationEditor() {
   display.drawString("STREAM-URL", UI_LEFT, 94, 1);
   drawButton(UI_LEFT, 108, UI_WIDTH, 32,
              fittedText(editUrl, UI_WIDTH - 14, 1), PANEL);
-  drawButton(UI_LEFT, 159, 101, 36, "SAVE", ACCENT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 109, 159, 101, 36, "BACK", PANEL_LIGHT, TFT_WHITE,
-             1);
+  const int16_t actionWidth = (UI_WIDTH - 8) / 2;
+  drawButton(UI_LEFT, 159, actionWidth, 36, "SAVE", ACCENT, TFT_WHITE, 1);
+  drawButton(UI_LEFT + actionWidth + 8, 159, actionWidth, 36, "BACK",
+             PANEL_LIGHT, TFT_WHITE, 1);
   drawText("MP3/AAC-Stream (http/https)", UI_LEFT, 210, 1, TEXT_MUTED);
 }
 
@@ -745,56 +825,81 @@ void drawKeyboard() {
   const String visibleValue =
       editingPassword ? passwordForDisplay(keyboardValue) : keyboardValue;
   const int16_t valueWidth = editingPassword && !showWifiPassword
-                                 ? UI_WIDTH - 53
+                                 ? UI_WIDTH - (wideKeyboardLayout() ? 62 : 53)
                                  : UI_WIDTH;
-  drawText(fittedText(visibleValue, valueWidth, 1), UI_LEFT, 40, 1, TFT_WHITE);
+  drawText(fittedText(visibleValue, valueWidth, 1), UI_LEFT,
+           wideKeyboardLayout() ? 38 : 40, 1, TFT_WHITE);
   if (editingPassword) {
-    drawButton(UI_LEFT + UI_WIDTH - 48, 36, 48, 19,
+    const int16_t showWidth = wideKeyboardLayout() ? 54 : 48;
+    drawButton(UI_LEFT + UI_WIDTH - showWidth, 36, showWidth,
+               wideKeyboardLayout() ? 22 : 19,
                showWifiPassword ? "HIDE" : "SHOW", PANEL_LIGHT,
                TFT_WHITE, 1);
   }
-  display.drawFastHLine(UI_LEFT, 58, UI_WIDTH, 0x4208);
+  const int16_t separatorY = wideKeyboardLayout() ? 61 : 58;
+  display.drawFastHLine(UI_LEFT, separatorY, UI_WIDTH, 0x4208);
 
   for (uint8_t row = 0; row < 3; ++row) {
     const String keys = keyboardRow(row);
     if (keys.isEmpty()) {
       continue;
     }
-    const int16_t keyWidth = min<int16_t>(
-        32, (UI_WIDTH - (keys.length() - 1)) / keys.length());
+    const int16_t keyGap = keyboardKeyGap();
+    const int16_t keyWidth = keyboardKeyWidth(keys);
     const int16_t rowWidth =
-        keys.length() * keyWidth + keys.length() - 1;
+        keys.length() * keyWidth + (keys.length() - 1) * keyGap;
     const int16_t rowLeft = UI_LEFT + (UI_WIDTH - rowWidth) / 2;
     for (uint8_t column = 0; column < keys.length(); ++column) {
-      const int16_t x = rowLeft + column * (keyWidth + 1);
-      const int16_t y = 66 + row * 29;
+      const int16_t x = rowLeft + column * (keyWidth + keyGap);
+      const int16_t y = keyboardRowY(row);
       String label(keys[column]);
       if (keyboardPage == 0 && keyboardUppercase) {
         label.toUpperCase();
       }
-      drawButton(x, y, keyWidth, 25, label, PANEL_LIGHT, TFT_WHITE, 2);
+      drawButton(x, y, keyWidth, keyboardKeyHeight(), label, PANEL_LIGHT,
+                 TFT_WHITE, 2);
     }
   }
 
-  drawButton(UI_LEFT, 156, 39, 24,
+  const int16_t controlY = wideKeyboardLayout() ? 180 : 156;
+  const int16_t controlHeight = wideKeyboardLayout() ? 26 : 24;
+  int16_t controlX = 0;
+  int16_t controlWidth = 0;
+  keyboardControlBounds(0, controlX, controlWidth);
+  drawButton(controlX, controlY, controlWidth, controlHeight,
              keyboardPage == 0 && !keyboardUppercase ? "abc" : "ABC",
              PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 43, 156, 48, 24,
+  keyboardControlBounds(1, controlX, controlWidth);
+  drawButton(controlX, controlY, controlWidth, controlHeight,
              keyboardPage == 0 ? "?123"
                                : keyboardPage == 1 ? "SYM2" : "SYM1",
              PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 95, 156, 66, 24, "SPACE", PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 165, 156, 45, 24, "<-", PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 192, 98, 31, "CANCEL", PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + 106, 192, 104, 31, "DONE", ACCENT, TFT_WHITE, 1);
+  keyboardControlBounds(2, controlX, controlWidth);
+  drawButton(controlX, controlY, controlWidth, controlHeight, "SPACE",
+             PANEL_LIGHT, TFT_WHITE, 1);
+  keyboardControlBounds(3, controlX, controlWidth);
+  drawButton(controlX, controlY, controlWidth, controlHeight, "<-",
+             PANEL_LIGHT, TFT_WHITE, 1);
+  const int16_t actionY = wideKeyboardLayout() ? 211 : 192;
+  const int16_t actionHeight = wideKeyboardLayout() ? 24 : 31;
+  const int16_t actionWidth = wideKeyboardLayout() ? (UI_WIDTH - 8) / 2 : 98;
+  constexpr int16_t actionGap = 8;
+  drawButton(UI_LEFT, actionY, actionWidth, actionHeight, "CANCEL",
+             PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT + actionWidth + actionGap, actionY,
+             wideKeyboardLayout() ? actionWidth : 104, actionHeight, "DONE",
+             ACCENT, TFT_WHITE, 1);
 }
 
 void renderScreen() {
+  updateScreenLayout();
   renderTarget = &screenFrameBuffer;
   screenFrameBuffer.fillSprite(backgroundColor);
-  screenFrameBuffer.setViewport(CAT_PANEL_WIDTH, 0,
-                                DISPLAY_WIDTH - CAT_PANEL_WIDTH,
-                                DISPLAY_HEIGHT, false);
+  if (currentScreen == Screen::Home) {
+    screenFrameBuffer.setViewport(CAT_PANEL_WIDTH, 0,
+                                  DISPLAY_WIDTH - CAT_PANEL_WIDTH,
+                                  DISPLAY_HEIGHT, false);
+  }
   switch (currentScreen) {
     case Screen::Home:
       drawHome();
@@ -815,8 +920,12 @@ void renderScreen() {
       drawKeyboard();
       break;
   }
-  screenFrameBuffer.resetViewport();
-  drawCatFrame(millis());
+  if (currentScreen == Screen::Home) {
+    screenFrameBuffer.resetViewport();
+    drawCatFrame(millis());
+  } else {
+    screenFrameBuffer.pushSprite(0, 0);
+  }
   uiDirty = false;
   renderTarget = &display;
 }
@@ -1331,8 +1440,10 @@ void appendKeyboardCharacter(char value) {
 }
 
 void handleKeyboardTouch(int16_t x, int16_t y) {
+  const int16_t showWidth = wideKeyboardLayout() ? 54 : 48;
   if (keyboardTarget == KeyboardTarget::Password &&
-      pointInRect(x, y, UI_LEFT + UI_WIDTH - 48, 36, 48, 19)) {
+      pointInRect(x, y, UI_LEFT + UI_WIDTH - showWidth, 36, showWidth,
+                  wideKeyboardLayout() ? 22 : 19)) {
     showWifiPassword = !showWifiPassword;
     markUiDirty();
     return;
@@ -1343,15 +1454,15 @@ void handleKeyboardTouch(int16_t x, int16_t y) {
     if (keys.isEmpty()) {
       continue;
     }
-    const int16_t keyWidth = min<int16_t>(
-        32, (UI_WIDTH - (keys.length() - 1)) / keys.length());
-    const int16_t rowWidth =
-        keys.length() * keyWidth + keys.length() - 1;
+    const int16_t keyGap = keyboardKeyGap();
+    const int16_t keyWidth = keyboardKeyWidth(keys);
+    const int16_t rowWidth = keys.length() * keyWidth +
+                             (keys.length() - 1) * keyGap;
     const int16_t rowLeft = UI_LEFT + (UI_WIDTH - rowWidth) / 2;
     for (uint8_t column = 0; column < keys.length(); ++column) {
-      const int16_t keyX = rowLeft + column * (keyWidth + 1);
-      const int16_t keyY = 66 + row * 29;
-      if (pointInRect(x, y, keyX, keyY, keyWidth, 25)) {
+      const int16_t keyX = rowLeft + column * (keyWidth + keyGap);
+      const int16_t keyY = keyboardRowY(row);
+      if (pointInRect(x, y, keyX, keyY, keyWidth, keyboardKeyHeight())) {
         char value = keys[column];
         if (keyboardPage == 0 && keyboardUppercase) {
           value = static_cast<char>(value - 'a' + 'A');
@@ -1362,24 +1473,47 @@ void handleKeyboardTouch(int16_t x, int16_t y) {
     }
   }
 
-  if (pointInRect(x, y, UI_LEFT, 156, 39, 24)) {
+  const int16_t controlY = wideKeyboardLayout() ? 180 : 156;
+  const int16_t controlHeight = wideKeyboardLayout() ? 26 : 24;
+  int16_t controlX = 0;
+  int16_t controlWidth = 0;
+  keyboardControlBounds(0, controlX, controlWidth);
+  if (pointInRect(x, y, controlX, controlY, controlWidth, controlHeight)) {
     if (keyboardPage == 0) {
       keyboardUppercase = !keyboardUppercase;
     } else {
       keyboardPage = 0;
     }
-  } else if (pointInRect(x, y, UI_LEFT + 43, 156, 48, 24)) {
-    keyboardPage = keyboardPage == 0 ? 1 : keyboardPage == 1 ? 2 : 1;
-  } else if (pointInRect(x, y, UI_LEFT + 95, 156, 66, 24)) {
-    appendKeyboardCharacter(' ');
-  } else if (pointInRect(x, y, UI_LEFT + 165, 156, 45, 24)) {
-    if (!keyboardValue.isEmpty()) {
-      keyboardValue.remove(keyboardValue.length() - 1);
+  } else {
+    keyboardControlBounds(1, controlX, controlWidth);
+    if (pointInRect(x, y, controlX, controlY, controlWidth, controlHeight)) {
+      keyboardPage = keyboardPage == 0 ? 1 : keyboardPage == 1 ? 2 : 1;
+    } else {
+      keyboardControlBounds(2, controlX, controlWidth);
+      if (pointInRect(x, y, controlX, controlY, controlWidth,
+                      controlHeight)) {
+        appendKeyboardCharacter(' ');
+      } else {
+        keyboardControlBounds(3, controlX, controlWidth);
+        if (pointInRect(x, y, controlX, controlY, controlWidth,
+                        controlHeight) &&
+            !keyboardValue.isEmpty()) {
+          keyboardValue.remove(keyboardValue.length() - 1);
+        }
+      }
     }
-  } else if (pointInRect(x, y, UI_LEFT, 192, 98, 31)) {
+  }
+
+  const int16_t actionY = wideKeyboardLayout() ? 211 : 192;
+  const int16_t actionHeight = wideKeyboardLayout() ? 24 : 31;
+  const int16_t actionWidth = wideKeyboardLayout() ? (UI_WIDTH - 8) / 2 : 98;
+  const int16_t actionGap = 8;
+  if (pointInRect(x, y, UI_LEFT, actionY, actionWidth, actionHeight)) {
     finishKeyboard(false);
     return;
-  } else if (pointInRect(x, y, UI_LEFT + 106, 192, 104, 31)) {
+  } else if (pointInRect(x, y, UI_LEFT + actionWidth + actionGap, actionY,
+                         wideKeyboardLayout() ? actionWidth : 104,
+                         actionHeight)) {
     finishKeyboard(true);
     return;
   }
@@ -1494,23 +1628,26 @@ void handleHomeTouch(int16_t x, int16_t y) {
 
 void handleStationTouch(int16_t x, int16_t y) {
   if (deleteConfirmation) {
-    if (pointInRect(x, y, UI_LEFT + 14, 136, 88, 25)) {
+    if (pointInRect(x, y, UI_LEFT + 14, 136, 127, 25)) {
       deleteConfirmation = false;
-    } else if (pointInRect(x, y, UI_LEFT + 108, 136, 88, 25)) {
+    } else if (pointInRect(x, y, UI_LEFT + 147, 136, 127, 25)) {
       deleteStation(deleteIndex);
     }
     markUiDirty();
     return;
   }
 
-  if (y >= 41 && y < 41 + stationCount * 27) {
+  const uint8_t pageStart = stationListPage * STATIONS_PER_PAGE;
+  const uint8_t visibleStations =
+      min<uint8_t>(STATIONS_PER_PAGE, stationCount - pageStart);
+  if (y >= 41 && y < 41 + visibleStations * 27) {
     const uint8_t row = (y - 41) / 27;
     const uint8_t index = stationListPage * STATIONS_PER_PAGE + row;
     if (row < STATIONS_PER_PAGE && index < stationCount) {
-      if (x >= UI_LEFT + 182) {
+      if (x >= UI_LEFT + UI_WIDTH - 30) {
         deleteIndex = index;
         deleteConfirmation = true;
-      } else if (x >= UI_LEFT + 145) {
+      } else if (x >= UI_LEFT + UI_WIDTH - 60) {
         startStationEditor(false, index);
         return;
       } else {
@@ -1518,28 +1655,33 @@ void handleStationTouch(int16_t x, int16_t y) {
         return;
       }
     }
-  } else if (pointInRect(x, y, UI_LEFT, 204, 28, 25)) {
-    if (stationListPage > 0) {
-      --stationListPage;
+  } else {
+    const int16_t controlsWidth = 36 + 4 + 36 + 4 + 52 + 4 + 100 + 4 + 52;
+    const int16_t controlsLeft = UI_LEFT + (UI_WIDTH - controlsWidth) / 2;
+    if (pointInRect(x, y, controlsLeft, 204, 36, 25)) {
+      if (stationListPage > 0) {
+        --stationListPage;
+      }
+    } else if (pointInRect(x, y, controlsLeft + 40, 204, 36, 25)) {
+      if (stationListPage + 1 < stationPageCount()) {
+        ++stationListPage;
+      }
+    } else if (pointInRect(x, y, controlsLeft + 132, 204, 100, 25)) {
+      if (stationCount >= MAX_STATIONS) {
+        setStatus("Station list is full");
+      } else {
+        startStationEditor(true, stationCount);
+        return;
+      }
+    } else if (pointInRect(x, y, controlsLeft + 236, 204, 52, 25)) {
+      currentScreen = Screen::Home;
     }
-  } else if (pointInRect(x, y, UI_LEFT + 30, 204, 28, 25)) {
-    if (stationListPage + 1 < stationPageCount()) {
-      ++stationListPage;
-    }
-  } else if (pointInRect(x, y, UI_LEFT + 94, 204, 62, 25)) {
-    if (stationCount >= MAX_STATIONS) {
-      setStatus("Station list is full");
-    } else {
-      startStationEditor(true, stationCount);
-      return;
-    }
-  } else if (pointInRect(x, y, UI_LEFT + 158, 204, 52, 25)) {
-    currentScreen = Screen::Home;
   }
   markUiDirty();
 }
 
 void handleTouch(int16_t x, int16_t y) {
+  updateScreenLayout();
   switch (currentScreen) {
     case Screen::Home:
       if (pointInRect(x, y, 0, 195, CAT_PANEL_WIDTH, 45)) {
@@ -1549,21 +1691,25 @@ void handleTouch(int16_t x, int16_t y) {
       handleHomeTouch(x, y);
       break;
     case Screen::Settings:
+    {
+      const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
       if (pointInRect(x, y, UI_LEFT, 36, UI_WIDTH, 25)) {
         currentScreen = Screen::Wifi;
       } else if (pointInRect(x, y, UI_LEFT, 63, UI_WIDTH, 25)) {
         currentScreen = Screen::Stations;
         deleteConfirmation = false;
-      } else if (pointInRect(x, y, UI_LEFT, 89, 102, 24)) {
+      } else if (pointInRect(x, y, UI_LEFT, 89, toggleWidth, 24)) {
         setAudioBoost(!audioBoost);
-      } else if (pointInRect(x, y, UI_LEFT + 108, 89, 102, 24)) {
+      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 89,
+                             toggleWidth, 24)) {
         setAudioSpectrum(!audioSpectrumEnabled);
       } else if (pointInRect(x, y, UI_LEFT, 115, UI_WIDTH, 24)) {
         setAudioCompressor(!audioCompressorEnabled);
-      } else if (pointInRect(x, y, UI_LEFT, 187, UI_WIDTH, 19)) {
+      } else if (pointInRect(x, y, UI_LEFT, 187, UI_WIDTH,
+                             themeSwatchHeight + 2)) {
         for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
           if (pointInRect(x, y, themeSwatchX(index) - 1, 187,
-                          THEME_SWATCH_WIDTH + 2, THEME_SWATCH_HEIGHT + 2)) {
+                          themeSwatchWidth + 2, themeSwatchHeight + 2)) {
             setThemeColor(index);
             break;
           }
@@ -1575,6 +1721,7 @@ void handleTouch(int16_t x, int16_t y) {
       }
       markUiDirty();
       break;
+    }
     case Screen::Wifi:
       if (pointInRect(x, y, UI_LEFT, 54, UI_WIDTH, 34)) {
         beginKeyboard(KeyboardTarget::Ssid);
@@ -1583,11 +1730,12 @@ void handleTouch(int16_t x, int16_t y) {
       } else if (pointInRect(x, y, UI_LEFT, 151, UI_WIDTH, 18)) {
         showWifiPassword = !showWifiPassword;
         markUiDirty();
-      } else if (pointInRect(x, y, UI_LEFT, 176, 101, 32)) {
+      } else if (pointInRect(x, y, UI_LEFT, 176, (UI_WIDTH - 8) / 2, 32)) {
         if (saveWifiCredentials()) {
           beginWifiConnection();
         }
-      } else if (pointInRect(x, y, UI_LEFT + 109, 176, 101, 32)) {
+      } else if (pointInRect(x, y, UI_LEFT + (UI_WIDTH - 8) / 2 + 8, 176,
+                             (UI_WIDTH - 8) / 2, 32)) {
         currentScreen = Screen::Settings;
         markUiDirty();
       }
@@ -1600,9 +1748,10 @@ void handleTouch(int16_t x, int16_t y) {
         beginKeyboard(KeyboardTarget::StationName);
       } else if (pointInRect(x, y, UI_LEFT, 108, UI_WIDTH, 32)) {
         beginKeyboard(KeyboardTarget::StationUrl);
-      } else if (pointInRect(x, y, UI_LEFT, 159, 101, 36)) {
+      } else if (pointInRect(x, y, UI_LEFT, 159, (UI_WIDTH - 8) / 2, 36)) {
         saveStationEditor();
-      } else if (pointInRect(x, y, UI_LEFT + 109, 159, 101, 36)) {
+      } else if (pointInRect(x, y, UI_LEFT + (UI_WIDTH - 8) / 2 + 8, 159,
+                             (UI_WIDTH - 8) / 2, 36)) {
         currentScreen = Screen::Stations;
         markUiDirty();
       }
@@ -1765,7 +1914,8 @@ void loop() {
       markUiDirty();
     }
   }
-  if (now - lastCatFrameAt >= CAT_FRAME_INTERVAL_MS) {
+  if (currentScreen == Screen::Home &&
+      now - lastCatFrameAt >= CAT_FRAME_INTERVAL_MS) {
     lastCatFrameAt = now;
     if (uiDirty) {
       renderScreen();

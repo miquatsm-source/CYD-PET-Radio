@@ -101,13 +101,10 @@ void drawFrame(TFT_eSprite &frameBuffer, const char *petName) {
   frameBuffer.fillRect(0, 0, FAT_CAT_PANEL_WIDTH, 193, 0x0841);
   frameBuffer.drawFastHLine(0, 193, FAT_CAT_PANEL_WIDTH, 0x3186);
   frameBuffer.fillCircle(15, 44, 1, TFT_YELLOW);
-  frameBuffer.fillCircle(79, 30, 1, TFT_CYAN);
   frameBuffer.fillCircle(77, 105, 1, TFT_YELLOW);
   frameBuffer.setTextDatum(MC_DATUM);
   frameBuffer.setTextColor(TFT_CYAN, 0x0841);
   frameBuffer.drawString(petName, 48, 18, 2);
-  frameBuffer.setTextColor(0xAD55, 0x0841);
-  frameBuffer.drawString("RADIO", 48, 35, 1);
 }
 
 void drawAnimal(TFT_eSprite &frame, uint8_t index, int16_t bob,

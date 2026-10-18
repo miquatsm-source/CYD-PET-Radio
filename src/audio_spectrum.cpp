@@ -12,7 +12,7 @@ constexpr uint8_t SPECTRUM_BANDS = 8;
 constexpr uint32_t SPECTRUM_REFRESH_INTERVAL_MS = 250;
 constexpr uint32_t AUDIO_STALE_MS = 300;
 constexpr int16_t SPECTRUM_BASELINE = 238;
-constexpr int16_t SPECTRUM_MAX_HEIGHT = 26;
+constexpr int16_t SPECTRUM_MAX_HEIGHT = 32;
 
 struct AudioBlock {
   int16_t samples[FFT_SIZE];
@@ -184,10 +184,7 @@ void drawAudioSpectrum(TFT_eSprite &frameBuffer, uint32_t now,
     }
   }
 
-  if (animal == nullptr) {
-    frameBuffer.drawString("BASS", 16, 201, 1);
-    frameBuffer.drawString("TREBLE", 78, 201, 1);
-  } else {
+  if (animal != nullptr) {
     frameBuffer.drawString(String(animal->genre) + " " + animal->animalName,
                            FAT_CAT_PANEL_WIDTH / 2, 201, 1);
   }
