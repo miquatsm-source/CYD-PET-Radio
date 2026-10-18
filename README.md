@@ -4,7 +4,7 @@
 
 A touchscreen webradio for the ESP32-based CYD (Cheap Yellow Display), using
 the same basic board configuration as
-[CYD of the Dead](https://github.com/miquatsm-source/CYD-of-the-dead). A
+[CYD of the Dead](https://github.com/tsm-source/CYD-of-the-dead). A
 round, animated cat dances in the left 30% of the display while radio controls
 fill the right side. Both panels are rendered into 8-bit sprite buffers before
 being transferred to the display to prevent partial-frame flicker. The lower
@@ -133,7 +133,7 @@ settings, and cat animation are implemented for this CYD project.
 
 After enabling GitHub Pages for this repository with **Settings > Pages >
 Build and deployment > GitHub Actions**, install the latest firmware from the
-[web flasher](https://miquatsm-source.github.io/CYD-PET-Radio/). Every push
+[web flasher](https://tsm-source.github.io/CYD-PET-Radio/). Every push
 to `main` builds the firmware and deploys the flasher automatically.
 
 Use a desktop browser that supports Web Serial, such as Chrome or Edge, and a
