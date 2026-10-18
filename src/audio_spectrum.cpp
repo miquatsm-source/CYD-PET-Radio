@@ -1,6 +1,7 @@
 #include <math.h>
 
 #include "audio_compressor.h"
+#include "audio_dac.h"
 #include "audio_spectrum.h"
 #include "fat_cat.h"
 
@@ -155,9 +156,9 @@ void setAudioSpectrumEnabled(bool enabled) {
   }
 }
 
-void audio_process_i2s(uint32_t *sample, bool *continueI2S) {
-  *continueI2S = true;
-  processAudioCompressor(sample);
+namespace {
+
+void captureSpectrumSample(uint32_t sample) {
   if (!captureEnabled) {
     return;
   }
@@ -165,8 +166,8 @@ void audio_process_i2s(uint32_t *sample, bool *continueI2S) {
     return;
   }
 
-  const int16_t left = static_cast<int16_t>(*sample >> 16);
-  const int16_t right = static_cast<int16_t>(*sample & 0xFFFF);
+  const int16_t left = static_cast<int16_t>(sample >> 16);
+  const int16_t right = static_cast<int16_t>(sample & 0xFFFF);
   audioBlocks[writeBlock].samples[captureIndex++] =
       static_cast<int16_t>((static_cast<int32_t>(left) + right) / 2);
 
@@ -176,6 +177,15 @@ void audio_process_i2s(uint32_t *sample, bool *continueI2S) {
     writeBlock = (writeBlock + 1) % AUDIO_BLOCK_COUNT;
     ++queuedBlocks;
   }
+}
+
+}  // namespace
+
+void audio_process_i2s(uint32_t *sample, bool *continueI2S) {
+  *continueI2S = true;
+  processAudioCompressor(sample);
+  captureSpectrumSample(*sample);
+  processAudioDac(sample);
 }
 
 void drawAudioSpectrum(TFT_eSprite &frameBuffer, uint32_t now,

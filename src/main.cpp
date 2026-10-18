@@ -11,6 +11,7 @@
 
 #include "audio_spectrum.h"
 #include "audio_compressor.h"
+#include "audio_dac.h"
 #include "bubble_texts.h"
 #include "colors.h"
 #include "fat_cat.h"
@@ -150,6 +151,7 @@ bool audioBoost = false;
 bool audioAmpEnabled = false;
 bool audioSpectrumEnabled = true;
 bool audioCompressorEnabled = false;
+bool audioNoiseShaping = false;
 bool keyboardUppercase = false;
 uint8_t keyboardPage = 0;
 bool uiDirty = true;
@@ -685,8 +687,11 @@ void drawSettings() {
   drawButton(UI_LEFT + toggleWidth + 6, 90, toggleWidth, 24,
              String("GPIO4 AMP: ") + (audioAmpEnabled ? "ON" : "OFF"),
              audioAmpEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 117, UI_WIDTH, 22, "RECALIBRATE TOUCHSCREEN",
+  drawButton(UI_LEFT, 117, toggleWidth, 22, "RECALIBRATE TOUCH",
              PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT + toggleWidth + 6, 117, toggleWidth, 22,
+             String("NOISE SHAPE: ") + (audioNoiseShaping ? "ON" : "OFF"),
+             audioNoiseShaping ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
   display.drawString("VOLUME", UI_LEFT, 147, 1);
@@ -1214,6 +1219,18 @@ void setAudioCompressor(bool enabled) {
                                    : "Audio compression disabled");
 }
 
+void setAudioNoiseShaping(bool enabled) {
+  audioNoiseShaping = enabled;
+  setAudioNoiseShapingEnabled(enabled);
+  if (preferences.putBool("noiseshape", audioNoiseShaping) == 0) {
+    Serial.println("ERROR: could not save noise shaping setting.");
+    setStatus("Could not save noise shaping setting");
+    return;
+  }
+  setStatus(audioNoiseShaping ? "Noise shaping enabled"
+                              : "Noise shaping disabled");
+}
+
 void setAudioAmpEnabled(bool enabled) {
   audioAmpEnabled = enabled;
   digitalWrite(AUDIO_AMP_ENABLE_PIN, enabled ? LOW : HIGH);
@@ -1243,6 +1260,7 @@ void startStream() {
   updateGenreAnimal();
   radioAudio.stopSong();
   radioAudio.setVolume(volume);
+  startAudioFadeIn();
   if (!radioAudio.connecttohost(stations[selectedStation].url)) {
     streamActive = false;
     setStatus("Could not start stream");
@@ -1746,8 +1764,11 @@ void handleTouch(int16_t x, int16_t y) {
       } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 90,
                              toggleWidth, 24)) {
         setAudioAmpEnabled(!audioAmpEnabled);
-      } else if (pointInRect(x, y, UI_LEFT, 117, UI_WIDTH, 22)) {
+      } else if (pointInRect(x, y, UI_LEFT, 117, toggleWidth, 22)) {
         calibrateTouchscreen();
+      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 117,
+                             toggleWidth, 22)) {
+        setAudioNoiseShaping(!audioNoiseShaping);
       } else if (pointInRect(x, y, UI_LEFT, 187, UI_WIDTH,
                              themeSwatchHeight + 2)) {
         for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
@@ -1870,6 +1891,8 @@ void setup() {
   audioSpectrumEnabled = preferences.getBool("spectrum", true);
   audioCompressorEnabled = preferences.getBool("compressor", false);
   setAudioCompressorEnabled(audioCompressorEnabled);
+  audioNoiseShaping = preferences.getBool("noiseshape", false);
+  setAudioNoiseShapingEnabled(audioNoiseShaping);
   digitalWrite(AUDIO_AMP_ENABLE_PIN, audioAmpEnabled ? LOW : HIGH);
   pinMode(AUDIO_AMP_ENABLE_PIN, OUTPUT);
   themeColorIndex = min<uint8_t>(

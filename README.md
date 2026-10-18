@@ -55,6 +55,11 @@ GPIO 4 low; when disabled, it drives GPIO 4 high. Use this only with a CYD
 board revision whose speaker-amplifier enable is wired to GPIO 4, since pin
 assignments can differ between board revisions.
 
+The built-in DAC has only 8 bits, which causes audible hiss. Enable **NOISE
+SHAPE** in **MENU** to shift the quantization noise to higher frequencies where
+it is less audible. Every stream start also fades in over about a quarter of a
+second to reduce clicks when switching stations.
+
 The Wi-Fi connection scans every 2.4 GHz channel and reports whether the SSID
 was not found or WPA2 authentication failed. If the connection still fails,
 open the PlatformIO serial monitor at 115200 baud; diagnostic output includes
