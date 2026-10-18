@@ -44,6 +44,7 @@ constexpr uint32_t PET_TRANSITION_DURATION_MS = 900;
 constexpr uint32_t MIN_DANCE_DURATION_MS = 8000;
 constexpr uint32_t MAX_DANCE_DURATION_MS = 16000;
 constexpr int8_t AUDIO_BOOST_DB = 6;
+constexpr uint8_t AUDIO_AMP_ENABLE_PIN = 4;
 constexpr char BERLIN_TIMEZONE[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 
 constexpr uint16_t PANEL = 0x18E3;
@@ -145,6 +146,7 @@ bool showWifiPassword = false;
 bool deleteConfirmation = false;
 bool stationEditorIsNew = false;
 bool audioBoost = false;
+bool audioAmpEnabled = false;
 bool audioSpectrumEnabled = true;
 bool audioCompressorEnabled = false;
 bool keyboardUppercase = false;
@@ -666,18 +668,22 @@ void drawHome() {
 void drawSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("SETTINGS");
-  drawButton(UI_LEFT, 36, UI_WIDTH, 25, "WI-FI", PANEL_LIGHT);
-  drawButton(UI_LEFT, 63, UI_WIDTH, 25, "STATION LIST", PANEL_LIGHT);
   const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
-  drawButton(UI_LEFT, 89, toggleWidth, 24,
+  drawButton(UI_LEFT, 36, toggleWidth, 25, "WI-FI", PANEL_LIGHT);
+  drawButton(UI_LEFT + toggleWidth + 6, 36, toggleWidth, 25, "STATION LIST",
+             PANEL_LIGHT);
+  drawButton(UI_LEFT, 63, toggleWidth, 24,
              String("BOOST +6: ") + (audioBoost ? "ON" : "OFF"),
              audioBoost ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + toggleWidth + 6, 89, toggleWidth, 24,
+  drawButton(UI_LEFT + toggleWidth + 6, 63, toggleWidth, 24,
              String("SPECTRUM: ") + (audioSpectrumEnabled ? "ON" : "OFF"),
              audioSpectrumEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 115, UI_WIDTH, 24,
+  drawButton(UI_LEFT, 90, toggleWidth, 24,
              String("COMPRESSION: ") + (audioCompressorEnabled ? "ON" : "OFF"),
              audioCompressorEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT + toggleWidth + 6, 90, toggleWidth, 24,
+             String("GPIO4 AMP: ") + (audioAmpEnabled ? "ON" : "OFF"),
+             audioAmpEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
   display.drawString("VOLUME", UI_LEFT, 147, 1);
@@ -1205,6 +1211,19 @@ void setAudioCompressor(bool enabled) {
                                    : "Audio compression disabled");
 }
 
+void setAudioAmpEnabled(bool enabled) {
+  audioAmpEnabled = enabled;
+  digitalWrite(AUDIO_AMP_ENABLE_PIN, enabled ? LOW : HIGH);
+  pinMode(AUDIO_AMP_ENABLE_PIN, OUTPUT);
+  if (preferences.putBool("amp4", audioAmpEnabled) == 0) {
+    Serial.println("ERROR: could not save GPIO 4 amplifier setting.");
+    setStatus("Could not save GPIO 4 setting");
+    return;
+  }
+  setStatus(enabled ? "GPIO 4 amplifier enabled"
+                    : "GPIO 4 amplifier disabled");
+}
+
 void startStream() {
   if (stationCount == 0) {
     setStatus("No stations available");
@@ -1693,18 +1712,22 @@ void handleTouch(int16_t x, int16_t y) {
     case Screen::Settings:
     {
       const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
-      if (pointInRect(x, y, UI_LEFT, 36, UI_WIDTH, 25)) {
+      if (pointInRect(x, y, UI_LEFT, 36, toggleWidth, 25)) {
         currentScreen = Screen::Wifi;
-      } else if (pointInRect(x, y, UI_LEFT, 63, UI_WIDTH, 25)) {
+      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 36,
+                             toggleWidth, 25)) {
         currentScreen = Screen::Stations;
         deleteConfirmation = false;
-      } else if (pointInRect(x, y, UI_LEFT, 89, toggleWidth, 24)) {
+      } else if (pointInRect(x, y, UI_LEFT, 63, toggleWidth, 24)) {
         setAudioBoost(!audioBoost);
-      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 89,
+      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 63,
                              toggleWidth, 24)) {
         setAudioSpectrum(!audioSpectrumEnabled);
-      } else if (pointInRect(x, y, UI_LEFT, 115, UI_WIDTH, 24)) {
+      } else if (pointInRect(x, y, UI_LEFT, 90, toggleWidth, 24)) {
         setAudioCompressor(!audioCompressorEnabled);
+      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 90,
+                             toggleWidth, 24)) {
+        setAudioAmpEnabled(!audioAmpEnabled);
       } else if (pointInRect(x, y, UI_LEFT, 187, UI_WIDTH,
                              themeSwatchHeight + 2)) {
         for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
@@ -1823,9 +1846,12 @@ void setup() {
   wifiPassword = preferences.getString("password", "");
   volume = min<uint8_t>(preferences.getUChar("volume", 10), 21);
   audioBoost = preferences.getBool("boost", false);
+  audioAmpEnabled = preferences.getBool("amp4", false);
   audioSpectrumEnabled = preferences.getBool("spectrum", true);
   audioCompressorEnabled = preferences.getBool("compressor", false);
   setAudioCompressorEnabled(audioCompressorEnabled);
+  digitalWrite(AUDIO_AMP_ENABLE_PIN, audioAmpEnabled ? LOW : HIGH);
+  pinMode(AUDIO_AMP_ENABLE_PIN, OUTPUT);
   themeColorIndex = min<uint8_t>(
       preferences.getUChar("theme", DEFAULT_THEME_COLOR),
       THEME_COLOR_COUNT - 1);

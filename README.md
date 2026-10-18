@@ -49,6 +49,11 @@ If playback is too quiet at 100%, open **MENU** and enable **AUDIO BOOST
 Boost can cause distortion on loud audio; switch it off if playback clips.
 The regular volume control still sets the decoder level independently.
 
+The **GPIO4 AMP** option in **MENU** defaults to off. When enabled, it drives
+GPIO 4 low; when disabled, it drives GPIO 4 high. Use this only with a CYD
+board revision whose speaker-amplifier enable is wired to GPIO 4, since pin
+assignments can differ between board revisions.
+
 The Wi-Fi connection scans every 2.4 GHz channel and reports whether the SSID
 was not found or WPA2 authentication failed. If the connection still fails,
 open the PlatformIO serial monitor at 115200 baud; diagnostic output includes
