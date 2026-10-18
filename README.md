@@ -47,6 +47,11 @@ NTP; until synchronization, it shows placeholder dashes.
 
 Choose one of five dark background colors in **MENU**. The selection is saved
 across restarts, and interface text remains white for readability.
+The **BUTTONS** swatches in the same menu independently choose the button fill:
+charcoal, deep blue, teal, plum, or bronze. These muted dark colors keep white
+labels readable on both supported displays. The choice applies to play/pause
+and all toggle buttons, regardless of whether a toggle is on or off, and is
+saved across restarts.
 
 Enable optional dynamic audio compression in **MENU** to boost quieter audio
 while controlling loud peaks. This can make streaming volume more consistent,

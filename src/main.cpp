@@ -54,6 +54,8 @@ constexpr uint16_t PANEL_LIGHT = 0x2945;
 constexpr uint16_t ACCENT = 0x05BF;
 constexpr uint8_t THEME_COLOR_COUNT = 5;
 constexpr uint8_t DEFAULT_THEME_COLOR = 1;
+constexpr uint8_t BUTTON_COLOR_COUNT = 5;
+constexpr uint8_t DEFAULT_BUTTON_COLOR = 0;
 constexpr int16_t HOME_THEME_SWATCH_WIDTH = 36;
 constexpr int16_t HOME_THEME_SWATCH_HEIGHT = 16;
 constexpr int16_t HOME_THEME_SWATCH_GAP = 6;
@@ -63,6 +65,8 @@ constexpr int16_t MENU_THEME_SWATCH_GAP = 8;
 constexpr uint16_t THEME_COLORS[THEME_COLOR_COUNT] = {
     COLOR_DARK_BLUE, COLOR_DARK_GREY, COLOR_DARK_GREEN, COLOR_DARK_RED,
     COLOR_DARK_SLATE};
+constexpr uint16_t BUTTON_COLORS[BUTTON_COLOR_COUNT] = {
+    0x2945, 0x1908, 0x1A28, 0x4148, 0x5182};
 constexpr uint16_t TEXT_MUTED = 0x9CF3;
 constexpr uint16_t SUCCESS = 0x4FE7;
 constexpr uint16_t ERROR_COLOUR = 0xF986;
@@ -122,6 +126,7 @@ uint8_t selectedStation = 0;
 uint8_t stationListPage = 0;
 uint8_t volume = 10;
 uint8_t themeColorIndex = DEFAULT_THEME_COLOR;
+uint8_t buttonColorIndex = DEFAULT_BUTTON_COLOR;
 uint16_t backgroundColor = THEME_COLORS[DEFAULT_THEME_COLOR];
 uint8_t editorIndex = 0;
 uint8_t deleteIndex = 0;
@@ -556,6 +561,20 @@ void setThemeColor(uint8_t index) {
   markUiDirty();
 }
 
+void setButtonColor(uint8_t index) {
+  if (index >= BUTTON_COLOR_COUNT || index == buttonColorIndex) {
+    return;
+  }
+
+  buttonColorIndex = index;
+  if (preferences.putUChar("buttonColor", buttonColorIndex) == 0) {
+    Serial.println("ERROR: could not save button color setting.");
+    setStatus("Could not save button color");
+    return;
+  }
+  markUiDirty();
+}
+
 void drawText(const String &text, int16_t x, int16_t y, uint8_t font = 2,
               uint16_t colour = TFT_WHITE) {
   TFT_eSPI &display = *renderTarget;
@@ -569,6 +588,9 @@ void drawButton(int16_t x, int16_t y, int16_t width, int16_t height,
                 const String &label, uint16_t fill = PANEL_LIGHT,
                 uint16_t colour = TFT_WHITE, uint8_t font = 2) {
   TFT_eSPI &display = *renderTarget;
+  if (fill == PANEL_LIGHT) {
+    fill = BUTTON_COLORS[buttonColorIndex];
+  }
   display.fillRoundRect(x, y, width, height, 7, fill);
   display.drawRoundRect(x, y, width, height, 7, 0x4208);
   display.setTextDatum(MC_DATUM);
@@ -657,8 +679,7 @@ void drawHome() {
 
   drawButton(UI_LEFT, 105, 49, 36, "|<", PANEL_LIGHT);
   drawButton(UI_LEFT + 55, 105, 100, 36,
-             streamActive ? "PAUSE" : "PLAY",
-             streamActive ? 0x3286 : ACCENT);
+             streamActive ? "PAUSE" : "PLAY", PANEL_LIGHT);
   drawButton(UI_LEFT + 161, 105, 49, 36, ">|", PANEL_LIGHT);
 
   display.setTextDatum(TL_DATUM);
@@ -680,27 +701,29 @@ void drawHome() {
 void drawSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("SETTINGS");
+  drawButton(UI_LEFT + UI_WIDTH - 48, 4, 48, 23, "BACK", PANEL_LIGHT,
+             TFT_WHITE, 1);
   const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
   drawButton(UI_LEFT, 36, toggleWidth, 25, "WI-FI", PANEL_LIGHT);
   drawButton(UI_LEFT + toggleWidth + 6, 36, toggleWidth, 25, "STATION LIST",
              PANEL_LIGHT);
   drawButton(UI_LEFT, 63, toggleWidth, 24,
              String("BOOST +6: ") + (audioBoost ? "ON" : "OFF"),
-             audioBoost ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 1);
   drawButton(UI_LEFT + toggleWidth + 6, 63, toggleWidth, 24,
              String("SPECTRUM: ") + (audioSpectrumEnabled ? "ON" : "OFF"),
-             audioSpectrumEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 1);
   drawButton(UI_LEFT, 90, toggleWidth, 24,
              String("COMPRESSION: ") + (audioCompressorEnabled ? "ON" : "OFF"),
-             audioCompressorEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 1);
   drawButton(UI_LEFT + toggleWidth + 6, 90, toggleWidth, 24,
              String("GPIO4 AMP: ") + (audioAmpEnabled ? "ON" : "OFF"),
-             audioAmpEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 1);
   drawButton(UI_LEFT, 117, toggleWidth, 22, "RECALIBRATE TOUCH",
              PANEL_LIGHT, TFT_WHITE, 1);
   drawButton(UI_LEFT + toggleWidth + 6, 117, toggleWidth, 22,
              String("NOISE SHAPE: ") + (audioNoiseShaping ? "ON" : "OFF"),
-             audioNoiseShaping ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 1);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
   display.drawString("VOLUME", UI_LEFT, 147, 1);
@@ -725,7 +748,18 @@ void drawSettings() {
         themeSwatchHeight + 2, 5,
         index == themeColorIndex ? primaryTextColor() : 0x4208);
   }
-  drawButton(UI_LEFT, 213, UI_WIDTH, 23, "BACK", PANEL_LIGHT, TFT_WHITE, 1);
+  display.setTextColor(primaryTextColor(), backgroundColor);
+  display.drawString("BUTTONS", UI_LEFT, 207, 1);
+  constexpr int16_t buttonSwatchY = 216;
+  for (uint8_t index = 0; index < BUTTON_COLOR_COUNT; ++index) {
+    const int16_t swatchX = themeSwatchX(index);
+    display.fillRoundRect(swatchX, buttonSwatchY, themeSwatchWidth,
+                          themeSwatchHeight, 4, BUTTON_COLORS[index]);
+    display.drawRoundRect(
+        swatchX - 1, buttonSwatchY - 1, themeSwatchWidth + 2,
+        themeSwatchHeight + 2, 5,
+        index == buttonColorIndex ? primaryTextColor() : 0x4208);
+  }
 }
 
 void drawWifiSettings() {
@@ -1840,7 +1874,9 @@ void handleTouch(int16_t x, int16_t y) {
     case Screen::Settings:
     {
       const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
-      if (pointInRect(x, y, UI_LEFT, 36, toggleWidth, 25)) {
+      if (pointInRect(x, y, UI_LEFT + UI_WIDTH - 48, 4, 48, 23)) {
+        currentScreen = Screen::Home;
+      } else if (pointInRect(x, y, UI_LEFT, 36, toggleWidth, 25)) {
         currentScreen = Screen::Wifi;
       } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 36,
                              toggleWidth, 25)) {
@@ -1870,10 +1906,17 @@ void handleTouch(int16_t x, int16_t y) {
             break;
           }
         }
+      } else if (pointInRect(x, y, UI_LEFT, 215, UI_WIDTH,
+                             themeSwatchHeight + 2)) {
+        for (uint8_t index = 0; index < BUTTON_COLOR_COUNT; ++index) {
+          if (pointInRect(x, y, themeSwatchX(index) - 1, 215,
+                          themeSwatchWidth + 2, themeSwatchHeight + 2)) {
+            setButtonColor(index);
+            break;
+          }
+        }
       } else if (pointInRect(x, y, UI_LEFT, 159, UI_WIDTH, 18)) {
         adjustVolumeFromTouch(x);
-      } else if (pointInRect(x, y, UI_LEFT, 213, UI_WIDTH, 23)) {
-        currentScreen = Screen::Home;
       }
       markUiDirty();
       break;
@@ -1999,6 +2042,9 @@ void setup() {
       preferences.getUChar("theme", DEFAULT_THEME_COLOR),
       THEME_COLOR_COUNT - 1);
   backgroundColor = THEME_COLORS[themeColorIndex];
+  buttonColorIndex = min<uint8_t>(
+      preferences.getUChar("buttonColor", DEFAULT_BUTTON_COLOR),
+      BUTTON_COLOR_COUNT - 1);
   display.fillScreen(backgroundColor);
   setAudioSpectrumEnabled(audioSpectrumEnabled);
   selectedStation = preferences.getUChar("selected", 0);
