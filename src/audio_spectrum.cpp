@@ -13,6 +13,7 @@ constexpr uint32_t SPECTRUM_REFRESH_INTERVAL_MS = 250;
 constexpr uint32_t AUDIO_STALE_MS = 300;
 constexpr int16_t SPECTRUM_BASELINE = 238;
 constexpr int16_t SPECTRUM_MAX_HEIGHT = 32;
+constexpr float TILT_DB_PER_OCTAVE = 4.5f;
 
 struct AudioBlock {
   int16_t samples[FFT_SIZE];
@@ -33,6 +34,7 @@ volatile uint32_t lastAudioBlockAt = 0;
 uint32_t lastSpectrumAnalysisAt = 0;
 float real[FFT_SIZE]{};
 float imaginary[FFT_SIZE]{};
+float referenceDecibels = -60.0f;
 uint8_t targetHeights[SPECTRUM_BANDS]{};
 uint8_t displayedHeights[SPECTRUM_BANDS]{};
 
@@ -92,6 +94,8 @@ void analyzeBlock(const AudioBlock &block) {
   }
 
   constexpr float NORMALIZATION = FFT_SIZE * 0.25f * 32768.0f;
+  float bandDecibels[SPECTRUM_BANDS];
+  float loudestDecibels = -60.0f;
   for (uint8_t band = 0; band < SPECTRUM_BANDS; ++band) {
     float bandPower = 0.0f;
     const uint16_t firstBin = BAND_EDGES[band];
@@ -106,10 +110,27 @@ void analyzeBlock(const AudioBlock &block) {
 
     const float magnitude =
         sqrtf(bandPower / static_cast<float>(endBin - firstBin));
+    // Compensate the natural treble roll-off of music (about 4.5 dB/octave).
+    const float centreBin =
+        sqrtf(static_cast<float>(firstBin) * static_cast<float>(endBin));
     const float decibels =
-        magnitude > 0.001f ? 20.0f * log10f(magnitude) : -60.0f;
-    const float scaledHeight =
-        (decibels + 54.0f) * SPECTRUM_MAX_HEIGHT / 54.0f;
+        magnitude > 0.001f
+            ? 20.0f * log10f(magnitude) +
+                  TILT_DB_PER_OCTAVE * log2f(centreBin / BAND_EDGES[0])
+            : -60.0f;
+    bandDecibels[band] = decibels;
+    loudestDecibels = max(loudestDecibels, decibels);
+  }
+
+  // Auto gain: the loudest band sets the reference, which falls slowly so
+  // quiet passages and low volume settings still fill the bars.
+  referenceDecibels = loudestDecibels > referenceDecibels
+                          ? loudestDecibels
+                          : max(loudestDecibels, referenceDecibels - 1.0f);
+  const float topDecibels = max(referenceDecibels, -60.0f) + 3.0f;
+  for (uint8_t band = 0; band < SPECTRUM_BANDS; ++band) {
+    const float scaledHeight = (bandDecibels[band] - (topDecibels - 36.0f)) *
+                               SPECTRUM_MAX_HEIGHT / 36.0f;
     targetHeights[band] = scaledHeight > 0.0f
                               ? min<int16_t>(SPECTRUM_MAX_HEIGHT,
                                              static_cast<int16_t>(scaledHeight))
@@ -127,6 +148,7 @@ void setAudioSpectrumEnabled(bool enabled) {
   captureIndex = 0;
   lastAudioBlockAt = 0;
   lastSpectrumAnalysisAt = 0;
+  referenceDecibels = -60.0f;
   for (uint8_t band = 0; band < SPECTRUM_BANDS; ++band) {
     targetHeights[band] = 0;
     displayedHeights[band] = 0;

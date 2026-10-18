@@ -33,6 +33,7 @@ constexpr uint8_t STATION_URL_SIZE = 192;
 constexpr uint16_t CAT_FRAME_INTERVAL_MS = FAT_CAT_FRAME_INTERVAL_MS;
 constexpr uint16_t TOUCH_DEBOUNCE_MS = 180;
 constexpr uint32_t WIFI_TIMEOUT_MS = 25000;
+constexpr uint32_t WIFI_RECONNECT_DELAY_MS = 30000;
 constexpr uint32_t STREAM_RETRY_DELAY_MS = 3000;
 constexpr uint16_t CLOCK_UPDATE_INTERVAL_MS = 60000;
 constexpr uint16_t BITRATE_UPDATE_INTERVAL_MS = 1000;
@@ -1356,7 +1357,9 @@ void updateNetwork() {
                   static_cast<int>(WiFi.status()));
   }
 
+  static uint32_t wifiLostAt = 0;
   if (WiFi.status() == WL_CONNECTED) {
+    wifiLostAt = 0;
     if (wifiConnecting) {
       wifiConnecting = false;
       wifiDisconnectReason = 0;
@@ -1367,6 +1370,19 @@ void updateNetwork() {
         startStream();
       }
     }
+    return;
+  }
+
+  // Restart the connection (and stream) when Wi-Fi stays down for 30 s.
+  if (wifiConnecting || wifiSsid.isEmpty()) {
+    wifiLostAt = 0;
+  } else if (wifiLostAt == 0) {
+    wifiLostAt = millis();
+  } else if (millis() - wifiLostAt >= WIFI_RECONNECT_DELAY_MS) {
+    wifiLostAt = 0;
+    Serial.println("Wi-Fi down for 30 s, reconnecting.");
+    WiFi.disconnect();
+    startWifiConnection();
     return;
   }
 

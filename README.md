@@ -58,7 +58,9 @@ The Wi-Fi connection scans every 2.4 GHz channel and reports whether the SSID
 was not found or WPA2 authentication failed. If the connection still fails,
 open the PlatformIO serial monitor at 115200 baud; diagnostic output includes
 the Wi-Fi disconnect reason without printing the password. WPA2 Personal
-passphrases must contain 8–63 characters.
+passphrases must contain 8–63 characters. If the connection stays down for 30
+seconds, the radio automatically reconnects and restarts the stream, and keeps
+retrying every 30 seconds until Wi-Fi is available again.
 
 Open **STATIONS** or **MENU > STATION LIST** to play a station, edit its name or
 stream URL, add a station, or remove one. The list is paginated and supports up
@@ -101,8 +103,9 @@ Pets use three randomly selected dance animations that change during playback.
 When the displayed pet changes, the previous one runs out and the next runs in.
 Each appearance also gets a randomly selected outfit: a tie, sunglasses, boots,
 or a glitter jacket.
-The 8-band audio spectrum updates four times per second to reduce processing
-load and can be switched on or off by tapping the spectrum in the lower-left
+The 8-band audio spectrum adapts automatically to the volume and compensates
+the natural treble roll-off of music so all bars use the available height. It
+updates four times per second to reduce processing load and can be switched on or off by tapping the spectrum in the lower-left
 corner or through the settings menu; the selection is saved.
 To leave more internal RAM for MP3 decoding, the pet is drawn directly into the
 full-screen frame buffer instead of a second sprite; the decoder uses its
