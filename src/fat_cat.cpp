@@ -11,6 +11,8 @@ constexpr uint16_t EYE_COLOUR = 0x07E0;
 
 }  // namespace
 
+// Render the built-in cat using the same dance timing and outfit system as the
+// other pets, while keeping its dedicated full-panel artwork.
 void drawFatCat(TFT_eSprite &frameBuffer, uint32_t now, const char *petName,
                 PetDance dance, PetOutfit outfit) {
   const uint8_t pose = (now / FAT_CAT_FRAME_INTERVAL_MS) % 12;

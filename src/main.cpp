@@ -211,7 +211,7 @@ bool keyboardUppercase = false;
 uint8_t keyboardPage = 0;
 bool uiDirty = true;
 bool audioDirty = false;
-bool displayReady = false;
+// bool displayReady = false;  // No code reads this flag.
 volatile uint8_t wifiDisconnectReason = 0;
 volatile bool wifiDisconnectReasonPending = false;
 uint8_t selectedPetIndex = 0;
@@ -246,6 +246,8 @@ void showStationPageFor(uint8_t index);
 
 bool timerModeActive() { return timerState != TimerState::Inactive; }
 
+// Return the duration currently shown, accounting for ready, paused, and
+// running states while keeping the countdown safe across millis() rollover.
 uint32_t timerRemainingMs(uint32_t now) {
   if (timerState == TimerState::Ready) {
     return timerDurationSeconds * 1000;
@@ -260,6 +262,8 @@ uint32_t timerRemainingMs(uint32_t now) {
   return remaining > 0 ? static_cast<uint32_t>(remaining) : 0;
 }
 
+// Leave timer mode, stop the alarm, restore the pet animation, and resume any
+// stream that the timer itself stopped.
 void exitTimerMode(uint32_t now) {
   const bool resumeMusic = timerShouldResumeMusic;
   timerState = TimerState::Inactive;
@@ -280,6 +284,7 @@ void exitTimerMode(uint32_t now) {
   markUiDirty();
 }
 
+// Stop playback at the cutoff and remember whether it should resume later.
 void stopMusicForTimer() {
   timerMusicStopped = true;
   streamRestartPending = false;
@@ -293,6 +298,7 @@ void stopMusicForTimer() {
   }
 }
 
+// Start or resume the countdown from the selected duration.
 void startTimer(uint32_t now) {
   uint32_t remaining = timerState == TimerState::Paused
                            ? timerPausedRemainingMs
@@ -307,6 +313,7 @@ void startTimer(uint32_t now) {
   markUiDirty();
 }
 
+// Enter the expired state, stop music, and start the alarm chime.
 void expireTimer(uint32_t now) {
   stopMusicForTimer();
   timerState = TimerState::Expired;
@@ -319,6 +326,7 @@ void expireTimer(uint32_t now) {
   markUiDirty();
 }
 
+// Pause a running timer or confirm its expired state.
 void stopOrConfirmTimer(uint32_t now) {
   if (timerState == TimerState::Running) {
     timerPausedRemainingMs = timerRemainingMs(now);
@@ -334,6 +342,7 @@ void stopOrConfirmTimer(uint32_t now) {
   markUiDirty();
 }
 
+// Adjust and persist the configured duration or paused remaining time.
 void changeTimerDuration(int32_t deltaSeconds) {
   uint32_t currentSeconds =
       timerState == TimerState::Paused
@@ -354,6 +363,7 @@ void changeTimerDuration(int32_t deltaSeconds) {
   markUiDirty();
 }
 
+// Toggle timer mode from the home-screen TIMER control.
 void pressTimerButton(uint32_t now) {
   if (timerState == TimerState::Inactive) {
     timerState = TimerState::Ready;
@@ -364,6 +374,7 @@ void pressTimerButton(uint32_t now) {
   markUiDirty();
 }
 
+// Enforce the pre-expiry music cutoff and the post-expiry display timeout.
 void updateTimer(uint32_t now) {
   if (timerState == TimerState::Running) {
     const uint32_t remaining = timerRemainingMs(now);
@@ -380,6 +391,7 @@ void updateTimer(uint32_t now) {
 
 }
 
+// Select a different pet without repeating the currently selected pet.
 void chooseDifferentPet() {
   uint8_t nextIndex = esp_random() % (PET_COUNT - 1);
   if (nextIndex >= selectedPetIndex) {
@@ -388,11 +400,13 @@ void chooseDifferentPet() {
   selectedPetIndex = nextIndex;
 }
 
+// Select another pet and reset the automatic rotation deadline.
 void chooseDifferentPet(uint32_t now) {
   chooseDifferentPet();
   lastPetChangeAt = now;
 }
 
+// Choose another bubble message so successive appearances are not repetitive.
 void chooseDifferentBubbleText() {
   uint8_t nextIndex = esp_random() % 9;
   if (nextIndex >= bubbleTextIndex) {
@@ -459,6 +473,7 @@ void updatePetAnimation(uint32_t now) {
   }
 }
 
+// Convert the current enter/exit animation phase into its horizontal offset.
 int16_t petTransitionOffset(uint32_t now) {
   if (petTransition == PetTransition::Idle) {
     return 0;
@@ -472,6 +487,7 @@ int16_t petTransitionOffset(uint32_t now) {
              : travel - FAT_CAT_PANEL_WIDTH;
 }
 
+// Shift only the pet panel's pixels to animate its slide transition.
 void shiftPetPanel(TFT_eSprite &frameBuffer, int16_t offset) {
   if (offset == 0) {
     return;
@@ -503,6 +519,7 @@ void shiftPetPanel(TFT_eSprite &frameBuffer, int16_t offset) {
   }
 }
 
+// Show a new pet's message immediately, then cycle through timed appearances.
 void updateBubbleText(uint32_t now) {
   if (selectedPetIndex != bubblePetIndex) {
     bubblePetIndex = selectedPetIndex;
@@ -570,6 +587,7 @@ void drawTimerActionButton(const char *label) {
   screenFrameBuffer.drawString(label, 48, 172, 2);
 }
 
+// Render timer controls, or replace the panel with the pulsing expiry screen.
 void drawTimerPanel(uint32_t now) {
   if (timerState == TimerState::Expired) {
     const uint16_t phase = now % 1200;
@@ -640,6 +658,8 @@ void drawTimerPanel(uint32_t now) {
   }
 }
 
+// Render the pet or timer panel, then update shared overlays and push the
+// appropriate screen region to the display.
 void drawCatFrame(uint32_t now, bool pushFullFrame = false) {
   const bool timerExpired = timerState == TimerState::Expired;
   if (timerModeActive()) {
@@ -745,6 +765,7 @@ TwoLineText wrappedText(const String &source, int16_t maxWidth,
   return lines;
 }
 
+// Mask saved credentials unless the user explicitly enables password display.
 String passwordForDisplay(const String &password) {
   if (showWifiPassword) {
     return password;
@@ -758,6 +779,7 @@ String passwordForDisplay(const String &password) {
   return masked;
 }
 
+// Return the active keyboard row for the alphabetic or symbol page.
 String keyboardRow(uint8_t row) {
   if (keyboardPage == 1) {
     const String symbolRows[] = {"1234567890", "!@#$%^&*()",
@@ -842,6 +864,7 @@ void updateScreenLayout() {
   themeSwatchGap = MENU_THEME_SWATCH_GAP;
 }
 
+// Apply a validated background palette selection and persist it for next boot.
 void setThemeColor(uint8_t index) {
   if (index >= THEME_COLOR_COUNT || index == themeColorIndex) {
     return;
@@ -856,6 +879,7 @@ void setThemeColor(uint8_t index) {
   markUiDirty();
 }
 
+// Apply and persist the button palette used throughout the interface.
 void setButtonColor(uint8_t index) {
   if (index >= BUTTON_COLOR_COUNT || index == buttonColorIndex) {
     return;
@@ -906,6 +930,7 @@ void drawPanelHeader(const String &title) {
   display.drawFastHLine(UI_LEFT, 31, UI_WIDTH, 0x4208);
 }
 
+// Select the most useful Wi-Fi status text for the current connection state.
 String wifiStatusText() {
   if (wifiConnecting) {
     return "Connecting to Wi-Fi...";
@@ -919,6 +944,7 @@ String wifiStatusText() {
   return statusMessage;
 }
 
+// Draw the home-screen radio controls, stream metadata, clock, and timer entry.
 void drawHome() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("PET RADIO");
@@ -986,6 +1012,7 @@ void drawHome() {
   drawButton(UI_LEFT + 105, 190, 105, 36, "MENU", PANEL_LIGHT);
 }
 
+// Route touches on the timer panel to duration, start, pause, or confirm actions.
 void handleTimerTouch(int16_t x, int16_t y, uint32_t now) {
   if ((timerState == TimerState::Ready || timerState == TimerState::Paused) &&
       pointInRect(x, y, 4, 39, 43, 25)) {
@@ -1012,6 +1039,7 @@ void handleTimerTouch(int16_t x, int16_t y, uint32_t now) {
   }
 }
 
+// Draw the board-specific settings and audio preference controls.
 void drawSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("SETTINGS");
@@ -1082,6 +1110,7 @@ void drawSettings() {
 }
 
 #if defined(BOARD_FREENOVE_FNK0114L)
+// Draw controls available only on the FNK0114L's rear RGB LED.
 void drawRgbLedSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("RGB LED OPTIONS");
@@ -1126,6 +1155,7 @@ void drawRgbLedSettings() {
   }
 }
 
+// Set the FNK0114L RGB LED brightness while keeping its selected color.
 void setRgbLedOutput(uint8_t brightness) {
   const RgbColor color = RGB_LED_COLORS[rgbLedColorIndex];
   const uint32_t red = color.red * brightness / 255;
@@ -1136,6 +1166,7 @@ void setRgbLedOutput(uint8_t brightness) {
   ledcWrite(RGB_LED_BLUE_CHANNEL, 255 - blue);
 }
 
+// Initialize the board-specific LED output and start it in the off state.
 void initializeRgbLed() {
   ledcSetup(RGB_LED_RED_CHANNEL, 5000, 8);
   ledcSetup(RGB_LED_GREEN_CHANNEL, 5000, 8);
@@ -1146,6 +1177,7 @@ void initializeRgbLed() {
   setRgbLedOutput(0);
 }
 
+// Update timer-dependent LED pulsing and the optional normal pulse mode.
 void updateRgbLed(uint32_t now) {
   if (now - lastRgbLedUpdateAt < RGB_LED_UPDATE_INTERVAL_MS) {
     return;
@@ -1224,6 +1256,7 @@ void setRgbLedColor(uint8_t index) {
 }
 #endif
 
+// Draw the saved Wi-Fi credentials and connection status controls.
 void drawWifiSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("WI-FI SETTINGS");
@@ -1255,6 +1288,7 @@ void drawWifiSettings() {
            WiFi.status() == WL_CONNECTED ? SUCCESS : TEXT_MUTED);
 }
 
+// Draw the paged station list and its inline delete confirmation.
 void drawStations() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("STATION LIST");
@@ -1312,6 +1346,7 @@ void drawStations() {
              1);
 }
 
+// Draw editable station fields and save/back actions.
 void drawStationEditor() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader(stationEditorIsNew ? "NEW STATION" : "EDIT STATION");
@@ -1331,6 +1366,7 @@ void drawStationEditor() {
   drawText("MP3/AAC-Stream (http/https)", UI_LEFT, 210, 1, TEXT_MUTED);
 }
 
+// Draw the adaptive on-screen keyboard for credentials and station fields.
 void drawKeyboard() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader(keyboardTarget == KeyboardTarget::Ssid
@@ -1410,6 +1446,7 @@ void drawKeyboard() {
              ACCENT, TFT_WHITE, 1);
 }
 
+// Render the current screen into the sprite and then refresh the display.
 void renderScreen() {
   updateScreenLayout();
   renderTarget = &screenFrameBuffer;
@@ -1454,6 +1491,7 @@ void renderScreen() {
   renderTarget = &display;
 }
 
+// Draw one calibration target and wait for the user to touch its center.
 void drawCalibrationTarget(uint8_t index) {
   const int16_t targetX[] = {20, DISPLAY_WIDTH - 21, 20, DISPLAY_WIDTH - 21};
   const int16_t targetY[] = {20, 20, DISPLAY_HEIGHT - 21, DISPLAY_HEIGHT - 21};
@@ -1493,6 +1531,7 @@ void waitForTouchRelease() {
   delay(120);
 }
 
+// Collect calibration points and persist the mapping for the active board.
 void calibrateTouchscreen() {
 #if defined(BOARD_FREENOVE_FNK0114L)
   display.fillScreen(backgroundColor);
@@ -1593,6 +1632,7 @@ void calibrateTouchscreen() {
 #endif
 }
 
+// Map a raw touch reading to display coordinates, clamping out-of-range input.
 int16_t mapTouchCoordinate(uint16_t raw, uint16_t start, uint16_t end,
                            int16_t screenSize) {
   if (start == end) {
@@ -1665,6 +1705,7 @@ bool readTouchPoint(int16_t &x, int16_t &y) {
 #endif
 }
 
+// Update the home-screen status and schedule a redraw.
 void setStatus(const String &message) {
   statusMessage = message;
   markUiDirty();
@@ -1700,6 +1741,7 @@ bool saveStationList() {
   return saved;
 }
 
+// Populate the station array from the compiled-in defaults.
 void loadDefaultStations() {
   stationCount = DEFAULT_STATION_COUNT;
   for (uint8_t i = 0; i < stationCount; ++i) {
@@ -1710,6 +1752,7 @@ void loadDefaultStations() {
   }
 }
 
+// Detect the old factory list so it can be migrated to the current defaults.
 bool isLegacyDefaultPlaylist() {
   if (stationCount != 3) {
     return false;
@@ -1726,6 +1769,7 @@ bool isLegacyDefaultPlaylist() {
              0;
 }
 
+// Load persisted stations, repair incomplete data, and migrate legacy entries.
 void loadStations() {
   if (!preferences.isKey("count")) {
     loadDefaultStations();
@@ -1760,6 +1804,7 @@ void loadStations() {
   }
 }
 
+// Apply a bounded volume setting to the decoder and save it to preferences.
 void setVolume(uint8_t newVolume) {
   volume = min<uint8_t>(newVolume, 21);
   radioAudio.setVolume(volume);
@@ -1770,6 +1815,7 @@ void setVolume(uint8_t newVolume) {
   }
 }
 
+// Apply the optional equalizer boost and persist the user's choice.
 void setAudioBoost(bool enabled) {
   audioBoost = enabled;
   const int8_t gain = audioBoost ? AUDIO_BOOST_DB : 0;
@@ -1782,6 +1828,7 @@ void setAudioBoost(bool enabled) {
   setStatus(audioBoost ? "Audio boost enabled" : "Audio boost disabled");
 }
 
+// Toggle spectrum capture and persist the display preference.
 void setAudioSpectrum(bool enabled) {
   audioSpectrumEnabled = enabled;
   setAudioSpectrumEnabled(enabled);
@@ -1793,6 +1840,7 @@ void setAudioSpectrum(bool enabled) {
   markUiDirty();
 }
 
+// Toggle the audio compressor and persist the processing preference.
 void setAudioCompressor(bool enabled) {
   audioCompressorEnabled = enabled;
   setAudioCompressorEnabled(enabled);
@@ -1805,6 +1853,7 @@ void setAudioCompressor(bool enabled) {
                                    : "Audio compression disabled");
 }
 
+// Toggle DAC noise shaping and persist the processing preference.
 void setAudioNoiseShaping(bool enabled) {
   audioNoiseShaping = enabled;
   setAudioNoiseShapingEnabled(enabled);
@@ -1817,6 +1866,7 @@ void setAudioNoiseShaping(bool enabled) {
                               : "Noise shaping disabled");
 }
 
+// Control the optional active-low amplifier enable on compatible CYD boards.
 void setAudioAmpEnabled(bool enabled) {
   audioAmpEnabled = enabled;
   digitalWrite(AUDIO_AMP_ENABLE_PIN, enabled ? LOW : HIGH);
@@ -1830,6 +1880,7 @@ void setAudioAmpEnabled(bool enabled) {
                     : "GPIO 4 amplifier disabled");
 }
 
+// Restart the selected stream after checking timer and Wi-Fi constraints.
 void startStream() {
   if (stationCount == 0) {
     setStatus("No stations available");
@@ -1863,6 +1914,7 @@ void startStream() {
   setStatus("Connecting to stream...");
 }
 
+// Save a station selection and either start its stream or connect to Wi-Fi.
 void selectStation(uint8_t index) {
   if (index >= stationCount) {
     return;
@@ -1894,6 +1946,7 @@ void beginWifiConnection() {
   startWifiConnection();
 }
 
+// Save Wi-Fi credentials and report storage failures to the user and log.
 bool saveWifiCredentials() {
   const bool savedSsid = preferences.putString("ssid", wifiSsid) > 0;
   const bool savedPassword =
@@ -1906,6 +1959,7 @@ bool saveWifiCredentials() {
   return true;
 }
 
+// Begin Wi-Fi association and arrange to start playback when connected.
 void startWifiConnection() {
   if (wifiPassword.length() < 8 || wifiPassword.length() > 63) {
     wifiConnecting = false;
@@ -1936,6 +1990,7 @@ void startWifiConnection() {
                 static_cast<int>(result));
 }
 
+// Translate common Wi-Fi disconnect causes into actionable UI messages.
 String wifiFailureMessage(wl_status_t status, uint8_t reason) {
   if (reason == WIFI_REASON_NO_AP_FOUND || status == WL_NO_SSID_AVAIL) {
     return "SSID not found (check 2.4 GHz network)";
@@ -1956,6 +2011,7 @@ String wifiFailureMessage(wl_status_t status, uint8_t reason) {
          String(static_cast<int>(status)) + ")";
 }
 
+// Process asynchronous Wi-Fi events, timeouts, and automatic playback startup.
 void updateNetwork() {
   if (wifiDisconnectReasonPending) {
     const uint8_t reason = wifiDisconnectReason;
@@ -2007,6 +2063,7 @@ void updateNetwork() {
   }
 }
 
+// Load an existing station or prepare a blank entry for editing.
 void startStationEditor(bool isNew, uint8_t index) {
   stationEditorIsNew = isNew;
   editorIndex = index;
@@ -2019,6 +2076,7 @@ void startStationEditor(bool isNew, uint8_t index) {
   markUiDirty();
 }
 
+// Open the keyboard with the selected field's current value and return screen.
 void beginKeyboard(KeyboardTarget target) {
   keyboardTarget = target;
   keyboardReturnScreen = currentScreen;
@@ -2042,6 +2100,7 @@ void beginKeyboard(KeyboardTarget target) {
   markUiDirty();
 }
 
+// Commit or discard keyboard input, then return to the originating screen.
 void finishKeyboard(bool accept) {
   if (accept) {
     switch (keyboardTarget) {
@@ -2084,6 +2143,7 @@ void appendKeyboardCharacter(char value) {
   }
 }
 
+// Map keyboard touches to characters, mode changes, deletion, and actions.
 void handleKeyboardTouch(int16_t x, int16_t y) {
   const int16_t showWidth = wideKeyboardLayout() ? 54 : 48;
   if (keyboardTarget == KeyboardTarget::Password &&
@@ -2165,6 +2225,7 @@ void handleKeyboardTouch(int16_t x, int16_t y) {
   markUiDirty();
 }
 
+// Validate and persist the edited station, restarting it if it was playing.
 void saveStationEditor() {
   editName.trim();
   editUrl.trim();
@@ -2197,6 +2258,7 @@ void saveStationEditor() {
   }
 }
 
+// Remove a station, repair the selected index, and restart playback if needed.
 void deleteStation(uint8_t index) {
   if (index >= stationCount) {
     deleteConfirmation = false;
@@ -2234,6 +2296,7 @@ void deleteStation(uint8_t index) {
   }
 }
 
+// Convert the slider's horizontal touch coordinate into the 0-21 volume scale.
 void adjustVolumeFromTouch(int16_t x) {
   const int16_t relativeX = constrain(x - UI_LEFT - 2, 0, UI_WIDTH - 4);
   const uint8_t newVolume =
@@ -2242,6 +2305,7 @@ void adjustVolumeFromTouch(int16_t x) {
   setVolume(newVolume);
 }
 
+// Handle playback navigation and controls on the home screen.
 void handleHomeTouch(int16_t x, int16_t y) {
   if (pointInRect(x, y, UI_LEFT, 105, 49, 36)) {
     if (stationCount > 0) {
@@ -2270,6 +2334,7 @@ void handleHomeTouch(int16_t x, int16_t y) {
   markUiDirty();
 }
 
+// Handle station selection, paging, editing, deletion, and list navigation.
 void handleStationTouch(int16_t x, int16_t y) {
   if (deleteConfirmation) {
     if (pointInRect(x, y, UI_LEFT + 14, 136, 127, 25)) {
@@ -2324,6 +2389,7 @@ void handleStationTouch(int16_t x, int16_t y) {
   markUiDirty();
 }
 
+// Dispatch a calibrated touch to the active screen and its controls.
 void handleTouch(int16_t x, int16_t y) {
   updateScreenLayout();
   switch (currentScreen) {
@@ -2479,22 +2545,26 @@ void handleTouch(int16_t x, int16_t y) {
 
 }  // namespace
 
+// Audio-library callback used for decoder diagnostics.
 void audio_info(const char *info) {
   Serial.printf("audio: %s\n", info);
 }
 
+// Audio-library callback for the station name currently being decoded.
 void audio_showstation(const char *info) {
   streamStation = info;
   audioDirty = true;
   Serial.printf("station: %s\n", info);
 }
 
+// Audio-library callback for the current stream title.
 void audio_showstreamtitle(const char *info) {
   streamTitle = info;
   audioDirty = true;
   Serial.printf("stream title: %s\n", info);
 }
 
+// Schedule a delayed reconnect when the decoder reports end of stream.
 void audio_eof_stream(const char *info) {
   streamActive = false;
   streamRestartPending = true;
@@ -2503,6 +2573,7 @@ void audio_eof_stream(const char *info) {
   Serial.printf("audio: stream ended (%s)\n", info);
 }
 
+// Initialize hardware, restore settings, calibrate touch, and start networking.
 void setup() {
   Serial.begin(115200);
 #if defined(BOARD_FREENOVE_FNK0114L)
@@ -2627,6 +2698,7 @@ void setup() {
   markUiDirty();
 }
 
+// Service audio, networking, timer, animation, and display work continuously.
 void loop() {
   radioAudio.loop();
   updateNetwork();

@@ -9,6 +9,8 @@ constexpr uint16_t BOOT_BROWN = 0x8200;
 
 }
 
+// Draw the selected outfit over a pet, using the current bob offset to keep
+// clothing aligned with its animated body.
 void drawPetClothing(TFT_eSprite &frameBuffer, uint8_t animalIndex,
                      PetOutfit outfit, int16_t bob) {
   static const int16_t faceX[] = {48, 48, 48, 74, 66, 48, 48, 48, 77, 58};

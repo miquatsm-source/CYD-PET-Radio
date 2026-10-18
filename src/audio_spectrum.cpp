@@ -28,7 +28,7 @@ constexpr uint16_t BAND_COLOURS[SPECTRUM_BANDS] = {
 AudioBlock audioBlocks[AUDIO_BLOCK_COUNT]{};
 volatile uint8_t queuedBlocks = 0;
 volatile bool captureEnabled = true;
-uint8_t readBlock = 0;
+// uint8_t readBlock = 0;  // Analysis always consumes the newest queued block.
 uint8_t writeBlock = 0;
 uint16_t captureIndex = 0;
 volatile uint32_t lastAudioBlockAt = 0;
@@ -39,6 +39,8 @@ float referenceDecibels = -60.0f;
 uint8_t targetHeights[SPECTRUM_BANDS]{};
 uint8_t displayedHeights[SPECTRUM_BANDS]{};
 
+// Transform one captured audio block and convert its bins into smoothed band
+// targets, compensating for the typical treble roll-off in music.
 void analyzeBlock(const AudioBlock &block) {
   constexpr float FFT_TWO_PI = 6.28318530718f;
   for (uint16_t i = 0; i < FFT_SIZE; ++i) {
@@ -141,10 +143,11 @@ void analyzeBlock(const AudioBlock &block) {
 
 }  // namespace
 
+// Enable or disable sample capture and reset pending blocks and bar history.
 void setAudioSpectrumEnabled(bool enabled) {
   captureEnabled = enabled;
   queuedBlocks = 0;
-  readBlock = 0;
+  // readBlock = 0;
   writeBlock = 0;
   captureIndex = 0;
   lastAudioBlockAt = 0;
@@ -158,6 +161,7 @@ void setAudioSpectrumEnabled(bool enabled) {
 
 namespace {
 
+// Store mono samples in the bounded ring of blocks consumed by the UI task.
 void captureSpectrumSample(uint32_t sample) {
   if (!captureEnabled) {
     return;
@@ -181,6 +185,8 @@ void captureSpectrumSample(uint32_t sample) {
 
 }  // namespace
 
+// Chain DSP stages in the decoder's pre-I2S callback; continueI2S is retained
+// for the audio library's callback contract.
 void audio_process_i2s(uint32_t *sample, bool *continueI2S) {
   *continueI2S = true;
   processAudioCompressor(sample);
@@ -188,6 +194,7 @@ void audio_process_i2s(uint32_t *sample, bool *continueI2S) {
   processAudioDac(sample);
 }
 
+// Analyze pending audio blocks and draw the spectrum with per-frame bar easing.
 void drawAudioSpectrum(TFT_eSprite &frameBuffer, uint32_t now,
                        bool streamActive, bool enabled) {
   frameBuffer.fillRect(0, 195, FAT_CAT_PANEL_WIDTH, 45, 0x0841);
@@ -205,7 +212,7 @@ void drawAudioSpectrum(TFT_eSprite &frameBuffer, uint32_t now,
         (writeBlock + queuedBlocks - 1) % AUDIO_BLOCK_COUNT;
     analyzeBlock(audioBlocks[newestBlock]);
     queuedBlocks = 0;
-    readBlock = writeBlock;
+    // readBlock = writeBlock;
     lastSpectrumAnalysisAt = now;
   }
 

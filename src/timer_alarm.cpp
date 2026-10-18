@@ -22,6 +22,8 @@ constexpr UBaseType_t ALARM_TASK_PRIORITY = 1;
 volatile bool playing = false;
 TaskHandle_t alarmTaskHandle = nullptr;
 
+// Generate one sample from the three-note chime, including short note
+// envelopes to avoid discontinuities at note boundaries.
 int16_t sampleForFrame(uint32_t frame, uint8_t alarmVolume) {
   uint32_t noteFrame = 0;
   uint32_t noteLength = 0;
@@ -58,6 +60,7 @@ int16_t sampleForFrame(uint32_t frame, uint8_t alarmVolume) {
   return static_cast<int16_t>(sinf(angle) * amplitude);
 }
 
+// Feed the generated chime to I2S independently of the main UI/audio loop.
 void alarmTask(void *parameter) {
   Audio *audio = static_cast<Audio *>(parameter);
   const i2s_port_t port = static_cast<i2s_port_t>(audio->getI2sPort());
@@ -99,6 +102,7 @@ void alarmTask(void *parameter) {
 
 }  // namespace
 
+// Configure I2S and launch the alarm writer; return false if setup fails.
 bool startTimerAlarm(Audio &audio, uint8_t musicVolume) {
   if (musicVolume == 0) {
     playing = false;
@@ -138,6 +142,7 @@ bool startTimerAlarm(Audio &audio, uint8_t musicVolume) {
   return true;
 }
 
+// Stop the alarm task's output immediately and clear any queued DMA samples.
 void stopTimerAlarm(Audio &audio) {
   playing = false;
   const esp_err_t result =

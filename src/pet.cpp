@@ -32,6 +32,7 @@ uint16_t rgb(uint8_t red, uint8_t green, uint8_t blue) {
   return ((red & 0xF8) << 8) | ((green & 0xFC) << 3) | (blue >> 3);
 }
 
+// Draw a line with rounded ends using two caps and a pair of edge triangles.
 void thickLine(TFT_eSprite &frame, int16_t x0, int16_t y0, int16_t x1,
                int16_t y1, int16_t width, uint16_t colour) {
   const float dx = x1 - x0;
@@ -230,6 +231,7 @@ void drawChameleon(TFT_eSprite &frame, int16_t bob, uint8_t pose, bool neon) {
 
 constexpr int8_t kWave[] = {0, 2, 4, 6, 4, 2, 0, -2, -4, -6, -4, -2};
 
+// Fill a four-corner polygon as two triangles using the display primitives.
 void fillQuad(TFT_eSprite &frame, int16_t x0, int16_t y0, int16_t x1,
               int16_t y1, int16_t x2, int16_t y2, int16_t x3, int16_t y3,
               uint16_t colour) {
@@ -237,6 +239,7 @@ void fillQuad(TFT_eSprite &frame, int16_t x0, int16_t y0, int16_t x1,
   frame.fillTriangle(x0, y0, x2, y2, x3, y3, colour);
 }
 
+// Approximate an elliptical thick arc with overlapping circles.
 void drawThickArc(TFT_eSprite &frame, int16_t cx, int16_t cy, int16_t rx,
                   int16_t ry, int16_t from, int16_t to, int16_t width,
                   uint16_t colour) {
@@ -710,6 +713,7 @@ void drawBudgie(TFT_eSprite &frame, int16_t b, uint8_t pose, bool glitter) {
   }
 }
 
+// Dispatch to the selected animal renderer and add dance-specific accents.
 void drawAnimal(TFT_eSprite &frame, uint8_t index, int16_t bob,
                 PetDance dance, uint8_t pose) {
   static const int8_t sway[] = {0, 1, 2, 3, 2, 1, 0, -1, -2, -3, -2, -1};
@@ -791,6 +795,7 @@ void drawLabels(TFT_eSprite &frame, const Pet &pet) {
 
 }  // namespace
 
+// Compose the selected pet frame from its background, pose, outfit, and label.
 void drawPet(TFT_eSprite &frameBuffer, uint32_t now, const Pet &pet,
              PetDance dance, PetOutfit outfit) {
   if (pet.drawingIndex < 0) {

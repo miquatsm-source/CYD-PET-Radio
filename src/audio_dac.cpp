@@ -14,6 +14,8 @@ volatile uint32_t fadeStartedAt = 0;
 int32_t errorLeft = 0;
 int32_t errorRight = 0;
 
+// Quantize to the built-in DAC's 8-bit resolution while feeding the error
+// forward so low-level signals retain their average value.
 int32_t quantize(int32_t value, int32_t &error) {
   const int32_t wanted = value - error;
   int32_t quantized = ((wanted + DAC_STEP / 2) >> 8) << 8;
@@ -33,12 +35,14 @@ int32_t quantize(int32_t value, int32_t &error) {
 
 }  // namespace
 
+// Enable error-feedback quantization for the ESP32's low-resolution DAC.
 void setAudioNoiseShapingEnabled(bool enabled) {
   noiseShapingEnabled = enabled;
   errorLeft = 0;
   errorRight = 0;
 }
 
+// Arm a mute hold and fade that begin on the first non-silent decoded sample.
 void startAudioFadeIn() {
   fadeStarted = false;
   fadeArmed = true;
@@ -47,6 +51,7 @@ void startAudioFadeIn() {
   errorRight = 0;
 }
 
+// Apply the startup fade and optional DAC noise shaping before each I2S write.
 void processAudioDac(uint32_t *sample) {
   if (sample == nullptr) {
     return;

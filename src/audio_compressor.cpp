@@ -22,6 +22,7 @@ int16_t saturateSample(int32_t sample) {
   return static_cast<int16_t>(sample);
 }
 
+// Apply a Q15 gain while keeping the integer and fractional products separate.
 int32_t applyGain(int16_t sample, uint32_t gainQ15) {
   const int32_t integerGain = gainQ15 >> 15;
   const int32_t fractionalGain = gainQ15 & 0x7FFF;
@@ -31,12 +32,14 @@ int32_t applyGain(int16_t sample, uint32_t gainQ15) {
 
 }  // namespace
 
+// Enable compression and reset its envelope so it adapts cleanly to new audio.
 void setAudioCompressorEnabled(bool enabled) {
   compressorEnabled = enabled;
   envelopeInitialized = false;
   envelope = 0;
 }
 
+// Apply peak compression with smoothed attack/release and fixed-point gain.
 void processAudioCompressor(uint32_t *sample) {
   if (!compressorEnabled || sample == nullptr) {
     return;
