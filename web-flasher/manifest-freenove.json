@@ -1,0 +1,29 @@
+{
+  "name": "CYD PET Radio - Freenove FNK0114L",
+  "version": "latest",
+  "new_install_prompt_erase": true,
+  "new_install_improv_wait_time": 0,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "firmware/freenove/bootloader.bin",
+          "offset": 4096
+        },
+        {
+          "path": "firmware/freenove/partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "firmware/freenove/boot_app0.bin",
+          "offset": 57344
+        },
+        {
+          "path": "firmware/freenove/firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

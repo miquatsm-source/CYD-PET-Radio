@@ -126,6 +126,9 @@ uint16_t backgroundColor = THEME_COLORS[DEFAULT_THEME_COLOR];
 uint8_t editorIndex = 0;
 uint8_t deleteIndex = 0;
 TouchCalibration touchCalibration{};
+#if defined(BOARD_FREENOVE_FNK0114L)
+uint16_t freenoveTouchCalibration[5]{};
+#endif
 Screen currentScreen = Screen::Home;
 Screen keyboardReturnScreen = Screen::Wifi;
 KeyboardTarget keyboardTarget = KeyboardTarget::Ssid;
@@ -184,6 +187,7 @@ PetOutfit petOutfit = PetOutfit::Tie;
 
 void startWifiConnection();
 void markUiDirty();
+void setStatus(const String &message);
 void updateScreenLayout();
 uint8_t stationPageCount();
 void showStationPageFor(uint8_t index);
@@ -397,7 +401,7 @@ void drawSpeechBubble(TFT_eSprite &frameBuffer, const char *text) {
   frameBuffer.drawString(text, 48, 63, 1);
 }
 
-void drawCatFrame(uint32_t now) {
+void drawCatFrame(uint32_t now, bool pushFullFrame = false) {
   if (displayedPet == nullptr) {
     drawFatCat(screenFrameBuffer, now, "Claudia", petDance, petOutfit);
   } else {
@@ -410,7 +414,12 @@ void drawCatFrame(uint32_t now) {
   shiftPetPanel(screenFrameBuffer, petTransitionOffset(now));
   drawAudioSpectrum(screenFrameBuffer, now, currentGenreAnimal, streamActive,
                     audioSpectrumEnabled);
-  screenFrameBuffer.pushSprite(0, 0);
+  if (pushFullFrame) {
+    screenFrameBuffer.pushSprite(0, 0);
+  } else {
+    screenFrameBuffer.pushSprite(0, 0, 0, 0, CAT_PANEL_WIDTH,
+                                 DISPLAY_HEIGHT);
+  }
 }
 
 bool pointInRect(int16_t x, int16_t y, int16_t left, int16_t top,
@@ -936,7 +945,7 @@ void renderScreen() {
   }
   if (currentScreen == Screen::Home) {
     screenFrameBuffer.resetViewport();
-    drawCatFrame(millis());
+    drawCatFrame(millis(), true);
   } else {
     screenFrameBuffer.pushSprite(0, 0);
   }
@@ -958,14 +967,62 @@ void drawCalibrationTarget(uint8_t index) {
   display.drawFastVLine(targetX[index], targetY[index] - 18, 37, TFT_CYAN);
 }
 
+bool touchscreenTouched() {
+#if defined(BOARD_FREENOVE_FNK0114L)
+  return display.getTouchRawZ() > 350;
+#else
+  return touch.touched();
+#endif
+}
+
+void readRawTouch(uint16_t &x, uint16_t &y) {
+#if defined(BOARD_FREENOVE_FNK0114L)
+  display.getTouchRaw(&x, &y);
+#else
+  const TS_Point point = touch.getPoint();
+  x = point.x;
+  y = point.y;
+#endif
+}
+
 void waitForTouchRelease() {
-  while (touch.touched()) {
+  while (touchscreenTouched()) {
     delay(10);
   }
   delay(120);
 }
 
 void calibrateTouchscreen() {
+#if defined(BOARD_FREENOVE_FNK0114L)
+  display.fillScreen(backgroundColor);
+  display.setTextDatum(TC_DATUM);
+  display.setTextColor(primaryTextColor(), backgroundColor);
+  display.drawString("Touch calibration", display.width() / 2, 18, 2);
+  display.drawCentreString("Touch each corner mark", display.width() / 2, 48,
+                           2);
+  Serial.println("Touchscreen calibration started; touch all four corner marks.");
+  display.calibrateTouch(freenoveTouchCalibration, TFT_CYAN, backgroundColor,
+                        15);
+  Serial.println("Touchscreen calibration completed.");
+  if (freenoveTouchCalibration[1] < 500 ||
+      freenoveTouchCalibration[3] < 500) {
+    Serial.println("ERROR: Freenove touchscreen calibration range is invalid.");
+    setStatus("Touch calibration failed");
+    return;
+  }
+  display.setTouch(freenoveTouchCalibration);
+  bool saved = true;
+  for (uint8_t index = 0; index < 5; ++index) {
+    if (preferences.putUShort(("fcal" + String(index)).c_str(),
+                              freenoveTouchCalibration[index]) == 0) {
+      saved = false;
+    }
+  }
+  if (!saved) {
+    Serial.println("ERROR: could not save Freenove touchscreen calibration.");
+    setStatus("Could not save touch calibration");
+  }
+#else
   const int16_t targetX[] = {20, DISPLAY_WIDTH - 21, 20, DISPLAY_WIDTH - 21};
   const int16_t targetY[] = {20, 20, DISPLAY_HEIGHT - 21, DISPLAY_HEIGHT - 21};
 
@@ -975,21 +1032,23 @@ void calibrateTouchscreen() {
     for (uint8_t target = 0; target < 4; ++target) {
       drawCalibrationTarget(target);
       waitForTouchRelease();
-      while (!touch.touched()) {
+      while (!touchscreenTouched()) {
         delay(10);
       }
       uint32_t sumX = 0;
       uint32_t sumY = 0;
       uint8_t samples = 0;
       while (samples == 0) {
-        while (!touch.touched()) {
+        while (!touchscreenTouched()) {
           delay(10);
         }
         for (uint8_t sample = 0; sample < 8; ++sample) {
-          if (touch.touched()) {
-            const TS_Point point = touch.getPoint();
-            sumX += point.x;
-            sumY += point.y;
+          if (touchscreenTouched()) {
+            uint16_t rawX = 0;
+            uint16_t rawY = 0;
+            readRawTouch(rawX, rawY);
+            sumX += rawX;
+            sumY += rawY;
             ++samples;
           }
           delay(8);
@@ -1030,6 +1089,7 @@ void calibrateTouchscreen() {
   if (!saved) {
     Serial.println("ERROR: could not save touchscreen calibration.");
   }
+#endif
 }
 
 int16_t mapTouchCoordinate(uint16_t raw, uint16_t start, uint16_t end,
@@ -1044,7 +1104,29 @@ int16_t mapTouchCoordinate(uint16_t raw, uint16_t start, uint16_t end,
 }
 
 bool readTouchPoint(int16_t &x, int16_t &y) {
-  if (!touch.touched()) {
+#if defined(BOARD_FREENOVE_FNK0114L)
+  uint16_t calibratedX = 0;
+  uint16_t calibratedY = 0;
+  if (display.getTouchRawZ() < 350) {
+    touchHeld = false;
+    return false;
+  }
+  if (touchHeld) {
+    return false;
+  }
+  touchHeld = true;
+  const uint32_t now = millis();
+  if (now - lastTouchAt < TOUCH_DEBOUNCE_MS) {
+    return false;
+  }
+  lastTouchAt = now;
+  display.getTouchRaw(&calibratedX, &calibratedY);
+  display.convertRawXY(&calibratedX, &calibratedY);
+  x = calibratedX;
+  y = calibratedY;
+  return true;
+#else
+  if (!touchscreenTouched()) {
     touchHeld = false;
     return false;
   }
@@ -1062,10 +1144,12 @@ bool readTouchPoint(int16_t &x, int16_t &y) {
   uint32_t sumX = 0;
   uint32_t sumY = 0;
   uint8_t samples = 0;
-  for (uint8_t i = 0; i < 3 && touch.touched(); ++i) {
-    const TS_Point point = touch.getPoint();
-    sumX += point.x;
-    sumY += point.y;
+  for (uint8_t i = 0; i < 3 && touchscreenTouched(); ++i) {
+    uint16_t rawX = 0;
+    uint16_t rawY = 0;
+    readRawTouch(rawX, rawY);
+    sumX += rawX;
+    sumY += rawY;
     ++samples;
     delayMicroseconds(1200);
   }
@@ -1077,6 +1161,7 @@ bool readTouchPoint(int16_t &x, int16_t &y) {
   y = mapTouchCoordinate(sumY / samples, touchCalibration.yTop,
                          touchCalibration.yBottom, display.height());
   return true;
+#endif
 }
 
 void setStatus(const String &message) {
@@ -1863,6 +1948,11 @@ void audio_eof_stream(const char *info) {
 
 void setup() {
   Serial.begin(115200);
+#if defined(BOARD_FREENOVE_FNK0114L)
+  Serial.println("Booting CYD PET Radio for Freenove FNK0114L.");
+#else
+  Serial.println("Booting CYD PET Radio for CYD.");
+#endif
   display.init();
   display.setRotation(1);
   display.fillScreen(TFT_BLACK);
@@ -1881,17 +1971,20 @@ void setup() {
     }
   }
 
+#if !defined(BOARD_FREENOVE_FNK0114L)
   touchSPI.begin(25, 39, 32, 33);
   if (!touch.begin(touchSPI)) {
     Serial.println("ERROR: XPT2046 touch controller initialization failed.");
   }
   touch.setRotation(1);
+#endif
 
   if (!preferences.begin("pet-radio", false)) {
     Serial.println("ERROR: could not open preferences storage.");
   }
   wifiSsid = preferences.getString("ssid", "");
   wifiPassword = preferences.getString("password", "");
+  Serial.println("Boot: preferences opened.");
   volume = min<uint8_t>(preferences.getUChar("volume", 10), 21);
   audioBoost = preferences.getBool("boost", false);
   audioAmpEnabled = preferences.getBool("amp4", false);
@@ -1909,11 +2002,25 @@ void setup() {
   display.fillScreen(backgroundColor);
   setAudioSpectrumEnabled(audioSpectrumEnabled);
   selectedStation = preferences.getUChar("selected", 0);
+  Serial.println("Boot: loading stations.");
   loadStations();
+  Serial.println("Boot: stations loaded.");
   if (selectedStation >= stationCount) {
     selectedStation = 0;
   }
 
+#if defined(BOARD_FREENOVE_FNK0114L)
+  for (uint8_t index = 0; index < 5; ++index) {
+    freenoveTouchCalibration[index] =
+        preferences.getUShort(("fcal" + String(index)).c_str(), 0);
+  }
+  if (freenoveTouchCalibration[1] < 500 ||
+      freenoveTouchCalibration[3] < 500) {
+    calibrateTouchscreen();
+  } else {
+    display.setTouch(freenoveTouchCalibration);
+  }
+#else
   touchCalibration.xLeft = preferences.getUShort("xLeft", 0);
   touchCalibration.xRight = preferences.getUShort("xRight", 0);
   touchCalibration.yTop = preferences.getUShort("yTop", 0);
@@ -1924,6 +2031,7 @@ void setup() {
           touchCalibration.yTop) < 500) {
     calibrateTouchscreen();
   }
+#endif
 
   radioAudio.forceMono(true);
   const int8_t audioGain = audioBoost ? AUDIO_BOOST_DB : 0;

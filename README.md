@@ -2,11 +2,11 @@
 
 > **AI disclosure:** The text of this README was created with AI assistance.
 
-A touchscreen webradio for the ESP32-based CYD (Cheap Yellow Display), using
-the same basic board configuration as
-[CYD of the Dead](https://github.com/tsm-source/CYD-of-the-dead). A
-round, animated cat dances in the left 30% of the display while radio controls
-fill the right side. Both panels are rendered into 8-bit sprite buffers before
+A touchscreen webradio for the ESP32-based CYD (Cheap Yellow Display) and the
+Freenove FNK0114L, using the same basic board configuration as
+[CYD of the Dead](https://github.com/tsm-source/CYD-of-the-dead). A round,
+animated cat dances in the left 30% of the display while radio controls fill
+the right side. Both panels are rendered into 8-bit sprite buffers before
 being transferred to the display to prevent partial-frame flicker. The lower
 left panel shows a pulsing eight-band FFT spectrum from bass to treble, based
 on the decoded audio samples.
@@ -15,17 +15,24 @@ on the decoded audio samples.
 
 ## Hardware configuration
 
-- ESP32 CYD with a 2.8-inch, 240 x 320 ST7789 display
-- XPT2046 touchscreen
-- Display and touch pin configuration in `include/cyd_user_setup.h`
-- Built-in ESP32 DAC on GPIO 26 for the CYD speaker output; audio is mixed to
-  mono for the single speaker
-- Wi-Fi credentials and station list are saved in ESP32 non-volatile storage
-- PlatformIO environments `esp32dev` (40 MHz display SPI) and
-  `esp32dev-fast` (80 MHz display SPI)
+The firmware supports both boards. Choose the matching firmware in PlatformIO
+or the web flasher; the images use different display and touch pin
+configurations and are not interchangeable.
 
-The fast environment uses an overclock and may be unstable on some boards.
-Use `esp32dev` if the display shows artifacts.
+| Feature | ESP32 CYD 2.8″ | Freenove FNK0114L 3.2″ |
+|---------|----------------|------------------------|
+| Display | ST7789, 240 × 320 | ST7789, 240 × 320 |
+| Touch | Resistive XPT2046, dedicated SPI bus | Resistive XPT2046, shared HSPI bus |
+| Backlight | GPIO 21 | GPIO 27 |
+| PlatformIO environment | `esp32dev` (40 MHz) or `esp32dev-fast` (80 MHz) | `fnk0114l` (80 MHz) |
+| Display setup | `include/cyd_user_setup.h` | `include/freenove_fnk0114l_setup.h` |
+
+Both boards use the ESP32's built-in DAC on GPIO 26 for mono speaker output.
+Wi-Fi credentials and the station list are saved in each board's non-volatile
+storage.
+
+The `esp32dev-fast` environment uses an overclock and may be unstable on some
+CYD boards. Use `esp32dev` if the display shows artifacts.
 
 ## Radio controls
 
@@ -153,9 +160,10 @@ settings, and cat animation are implemented for this CYD project.
 ## Install from a browser
 
 After enabling GitHub Pages for this repository with **Settings > Pages >
-Build and deployment > GitHub Actions**, install the latest firmware from the
-[web flasher](https://tsm-source.github.io/CYD-PET-Radio/). Every push
-to `main` builds the firmware and deploys the flasher automatically.
+Build and deployment > GitHub Actions**, choose the matching CYD or Freenove
+button on the [web flasher](https://tsm-source.github.io/CYD-PET-Radio/).
+Every push to `main` builds both firmware variants and deploys the flasher
+automatically.
 
 Use a desktop browser that supports Web Serial, such as Chrome or Edge, and a
 USB data cable. If the flasher offers to erase the device, erasing also
@@ -171,7 +179,9 @@ or run:
 ```sh
 pio run -e esp32dev-fast
 pio run -e esp32dev-fast -t upload
+pio run -e fnk0114l
+pio run -e fnk0114l -t upload
 ```
 
 The volume, Wi-Fi credentials, touchscreen calibration, and station list are
-stored on the CYD and persist across reboots.
+stored on each board and persist across reboots.
