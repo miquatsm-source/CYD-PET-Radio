@@ -685,6 +685,8 @@ void drawSettings() {
   drawButton(UI_LEFT + toggleWidth + 6, 90, toggleWidth, 24,
              String("GPIO4 AMP: ") + (audioAmpEnabled ? "ON" : "OFF"),
              audioAmpEnabled ? 0x2147 : PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT, 117, UI_WIDTH, 22, "RECALIBRATE TOUCHSCREEN",
+             PANEL_LIGHT, TFT_WHITE, 1);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
   display.drawString("VOLUME", UI_LEFT, 147, 1);
@@ -1744,6 +1746,8 @@ void handleTouch(int16_t x, int16_t y) {
       } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 90,
                              toggleWidth, 24)) {
         setAudioAmpEnabled(!audioAmpEnabled);
+      } else if (pointInRect(x, y, UI_LEFT, 117, UI_WIDTH, 22)) {
+        calibrateTouchscreen();
       } else if (pointInRect(x, y, UI_LEFT, 187, UI_WIDTH,
                              themeSwatchHeight + 2)) {
         for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {

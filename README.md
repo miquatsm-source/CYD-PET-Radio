@@ -29,7 +29,8 @@ Use `esp32dev` if the display shows artifacts.
 
 ## Radio controls
 
-On first boot, touch the four calibration targets. Open **MENU > WI-FI** to
+On first boot, touch the four calibration targets. To repeat the calibration
+later, open **MENU** and tap **RECALIBRATE TOUCHSCREEN**. Open **MENU > WI-FI** to
 enter the Wi-Fi network name and password with the touchscreen keyboard, then
 tap **CONNECT**. The radio starts its selected station once Wi-Fi connects.
 The home screen provides station navigation, play/pause, and a touchscreen
