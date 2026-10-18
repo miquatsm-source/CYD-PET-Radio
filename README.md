@@ -88,7 +88,7 @@ default is automatically migrated to the new list. Station URLs must be direct
 
 ![Slideshow of all CYD PET Radio pets with their names and genres](./docs/pets.gif)
 
-The slideshow above shows all eleven pets with their names and genres. It is
+The slideshow above shows all eleven pets with their names and genres. Every pet except Moritz and Blitz has two looks that the radio picks by dance: Willi hangs from a branch or sits and waves in a rasta cap, Egon has animated spots or headphones with neon stripes, Hoppe wears a hoodie or headphones with a boombox, Siegfried plays a flying-V guitar or throws devil horns, Leopold is a singer with a microphone or a king with a crown and sceptre, Ludwig conducts in a top hat or plays the violin in a baroque wig, Poldi shows a full fan or plays the rock star, and Hansi wears a glitter jacket or folk costume. It is
 rendered from the drawing code by `scripts/render_pets.py` (requires Pillow)
 and shows the pets without outfits; the device display looks slightly
 different.

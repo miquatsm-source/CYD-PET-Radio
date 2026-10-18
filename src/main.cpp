@@ -1743,6 +1743,13 @@ void handleTouch(int16_t x, int16_t y) {
         setAudioSpectrum(!audioSpectrumEnabled);
         return;
       }
+      if (pointInRect(x, y, 0, 0, CAT_PANEL_WIDTH, 195)) {
+        if (currentGenreAnimal == nullptr) {
+          chooseDifferentFallbackPet();
+          lastFallbackPetChangeAt = millis();
+        }
+        return;
+      }
       handleHomeTouch(x, y);
       break;
     case Screen::Settings:

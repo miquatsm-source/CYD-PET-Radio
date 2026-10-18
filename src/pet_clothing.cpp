@@ -11,9 +11,9 @@ constexpr uint16_t BOOT_BROWN = 0x8200;
 
 void drawPetClothing(TFT_eSprite &frameBuffer, uint8_t animalIndex,
                      PetOutfit outfit, int16_t bob) {
-  static const int16_t faceX[] = {48, 48, 48, 66, 64, 48, 58, 48, 65, 58};
-  static const int16_t faceY[] = {112, 114, 100, 132, 95,
-                                  78, 124, 108, 112, 116};
+  static const int16_t faceX[] = {48, 48, 48, 74, 66, 48, 48, 48, 77, 58};
+  static const int16_t faceY[] = {112, 98, 95, 145, 72,
+                                  80, 96, 99, 83, 116};
   const int16_t x = 48;
   const int16_t y = 137 + bob;
 
@@ -26,6 +26,9 @@ void drawPetClothing(TFT_eSprite &frameBuffer, uint8_t animalIndex,
                                TFT_YELLOW);
       break;
     case PetOutfit::Sunglasses: {
+      if (animalIndex == 0 || animalIndex == 9) {
+        break;
+      }
       const uint8_t index = animalIndex < 10 ? animalIndex : 5;
       const int16_t glassesY = faceY[index] + bob;
       const int16_t glassesX = faceX[index];
