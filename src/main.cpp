@@ -8,8 +8,10 @@
 #include <WiFi.h>
 #include <Audio.h>
 #include <esp_system.h>
+#include <math.h>
 
 #include "audio_spectrum.h"
+#include "timer_alarm.h"
 #include "audio_compressor.h"
 #include "audio_dac.h"
 #include "bubble_texts.h"
@@ -45,6 +47,10 @@ constexpr uint32_t RANDOM_PET_INTERVAL_MS = 30000;
 constexpr uint32_t PET_TRANSITION_DURATION_MS = 900;
 constexpr uint32_t MIN_DANCE_DURATION_MS = 8000;
 constexpr uint32_t MAX_DANCE_DURATION_MS = 16000;
+constexpr uint32_t DEFAULT_TIMER_SECONDS = 5 * 60;
+constexpr uint32_t MAX_TIMER_SECONDS = 99 * 60 + 59;
+constexpr uint32_t TIMER_MUSIC_CUTOFF_MS = 5000;
+constexpr uint32_t TIMER_EXPIRED_DISPLAY_MS = 60000;
 constexpr int8_t AUDIO_BOOST_DB = 6;
 constexpr uint8_t AUDIO_AMP_ENABLE_PIN = 4;
 constexpr char BERLIN_TIMEZONE[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
@@ -125,6 +131,14 @@ enum class PetTransition : uint8_t {
   Exiting
 };
 
+enum class TimerState : uint8_t {
+  Inactive,
+  Ready,
+  Running,
+  Paused,
+  Expired
+};
+
 TFT_eSPI display;
 // Composite the UI and cat before pushing one complete frame to the TFT.
 TFT_eSprite screenFrameBuffer(&display);
@@ -145,6 +159,13 @@ uint8_t stationCount = 0;
 uint8_t selectedStation = 0;
 uint8_t stationListPage = 0;
 uint8_t volume = 10;
+uint32_t timerDurationSeconds = DEFAULT_TIMER_SECONDS;
+uint32_t timerEndAt = 0;
+uint32_t timerPausedRemainingMs = 0;
+uint32_t timerExpiredAt = 0;
+TimerState timerState = TimerState::Inactive;
+bool timerMusicStopped = false;
+bool timerShouldResumeMusic = false;
 uint8_t themeColorIndex = DEFAULT_THEME_COLOR;
 uint8_t buttonColorIndex = DEFAULT_BUTTON_COLOR;
 #if defined(BOARD_FREENOVE_FNK0114L)
@@ -216,11 +237,148 @@ PetDance petDance = PetDance::Bounce;
 PetOutfit petOutfit = PetOutfit::Tie;
 
 void startWifiConnection();
+void startStream();
 void markUiDirty();
 void setStatus(const String &message);
 void updateScreenLayout();
 uint8_t stationPageCount();
 void showStationPageFor(uint8_t index);
+
+bool timerModeActive() { return timerState != TimerState::Inactive; }
+
+uint32_t timerRemainingMs(uint32_t now) {
+  if (timerState == TimerState::Ready) {
+    return timerDurationSeconds * 1000;
+  }
+  if (timerState == TimerState::Paused) {
+    return timerPausedRemainingMs;
+  }
+  if (timerState != TimerState::Running) {
+    return 0;
+  }
+  const int32_t remaining = static_cast<int32_t>(timerEndAt - now);
+  return remaining > 0 ? static_cast<uint32_t>(remaining) : 0;
+}
+
+void exitTimerMode(uint32_t now) {
+  const bool resumeMusic = timerShouldResumeMusic;
+  timerState = TimerState::Inactive;
+  timerMusicStopped = false;
+  timerShouldResumeMusic = false;
+  stopTimerAlarm(radioAudio);
+  lastPetChangeAt = now;
+  petAnimationInitialized = false;
+  petTransition = PetTransition::Entering;
+  petTransitionStartedAt = now;
+  if (resumeMusic) {
+    if (WiFi.status() == WL_CONNECTED) {
+      startStream();
+    } else if (!wifiSsid.isEmpty()) {
+      startWifiConnection();
+    }
+  }
+  markUiDirty();
+}
+
+void stopMusicForTimer() {
+  timerMusicStopped = true;
+  streamRestartPending = false;
+  if (streamActive) {
+    timerShouldResumeMusic = true;
+    radioAudio.stopSong();
+    streamActive = false;
+    streamTitle = "";
+    streamStation = "";
+    setStatus("Timer: music stopped");
+  }
+}
+
+void startTimer(uint32_t now) {
+  uint32_t remaining = timerState == TimerState::Paused
+                           ? timerPausedRemainingMs
+                           : timerDurationSeconds * 1000;
+  if (remaining == 0) {
+    setStatus("Set timer duration first");
+    markUiDirty();
+    return;
+  }
+  timerEndAt = now + remaining;
+  timerState = TimerState::Running;
+  markUiDirty();
+}
+
+void expireTimer(uint32_t now) {
+  stopMusicForTimer();
+  timerState = TimerState::Expired;
+  timerExpiredAt = now;
+  if (!startTimerAlarm(radioAudio, volume) && volume > 0) {
+    setStatus("Timer finished; alarm audio unavailable");
+  } else {
+    setStatus("Timer finished");
+  }
+  markUiDirty();
+}
+
+void stopOrConfirmTimer(uint32_t now) {
+  if (timerState == TimerState::Running) {
+    timerPausedRemainingMs = timerRemainingMs(now);
+    if (timerPausedRemainingMs == 0) {
+      expireTimer(now);
+      return;
+    }
+    timerState = TimerState::Paused;
+  } else if (timerState == TimerState::Expired) {
+    exitTimerMode(now);
+    return;
+  }
+  markUiDirty();
+}
+
+void changeTimerDuration(int32_t deltaSeconds) {
+  uint32_t currentSeconds =
+      timerState == TimerState::Paused
+          ? (timerPausedRemainingMs + 999) / 1000
+          : timerDurationSeconds;
+  const int64_t adjusted =
+      static_cast<int64_t>(currentSeconds) + deltaSeconds;
+  timerDurationSeconds = static_cast<uint32_t>(
+      adjusted < 0 ? 0
+                   : min<int64_t>(adjusted, MAX_TIMER_SECONDS));
+  if (timerState == TimerState::Paused) {
+    timerPausedRemainingMs = timerDurationSeconds * 1000;
+  }
+  if (preferences.putUInt("timerSecs", timerDurationSeconds) == 0) {
+    Serial.println("ERROR: could not save timer duration.");
+    setStatus("Could not save timer duration");
+  }
+  markUiDirty();
+}
+
+void pressTimerButton(uint32_t now) {
+  if (timerState == TimerState::Inactive) {
+    timerState = TimerState::Ready;
+  } else {
+    exitTimerMode(now);
+    return;
+  }
+  markUiDirty();
+}
+
+void updateTimer(uint32_t now) {
+  if (timerState == TimerState::Running) {
+    const uint32_t remaining = timerRemainingMs(now);
+    if (remaining <= TIMER_MUSIC_CUTOFF_MS && !timerMusicStopped) {
+      stopMusicForTimer();
+    }
+    if (remaining == 0) {
+      expireTimer(now);
+    }
+  } else if (timerState == TimerState::Expired &&
+             now - timerExpiredAt >= TIMER_EXPIRED_DISPLAY_MS) {
+    exitTimerMode(now);
+  }
+
+}
 
 void chooseDifferentPet() {
   uint8_t nextIndex = esp_random() % (PET_COUNT - 1);
@@ -386,30 +544,136 @@ void drawSpeechBubble(TFT_eSprite &frameBuffer, const char *text) {
   frameBuffer.drawString(text, 48, 63, 1);
 }
 
-void drawCatFrame(uint32_t now, bool pushFullFrame = false) {
-  const Pet &pet = petList[displayedPetIndex];
-  if (pet.drawingIndex < 0) {
-    drawFatCat(screenFrameBuffer, now, pet.animalName, petDance, petOutfit);
+void drawTimerAdjustButton(int16_t x, int16_t y, bool increase,
+                           const char *label) {
+  screenFrameBuffer.fillRoundRect(x, y, 43, 25, 5,
+                                  BUTTON_COLORS[buttonColorIndex]);
+  screenFrameBuffer.drawRoundRect(x, y, 43, 25, 5, 0x4208);
+  if (increase) {
+    screenFrameBuffer.fillTriangle(x + 7, y + 13, x + 15, y + 13, x + 11,
+                                   y + 7, TFT_WHITE);
   } else {
-    drawPet(screenFrameBuffer, now, pet, petDance, petOutfit);
+    screenFrameBuffer.fillTriangle(x + 7, y + 11, x + 15, y + 11, x + 11,
+                                   y + 17, TFT_WHITE);
   }
-  if (bubbleVisible) {
-    drawSpeechBubble(screenFrameBuffer,
-                     bubbleTexts[bubblePetIndex][bubbleTextIndex]);
+  screenFrameBuffer.setTextDatum(MC_DATUM);
+  screenFrameBuffer.setTextColor(TFT_WHITE, BUTTON_COLORS[buttonColorIndex]);
+  screenFrameBuffer.drawString(label, x + 30, y + 13, 1);
+}
+
+void drawTimerActionButton(const char *label) {
+  screenFrameBuffer.fillRoundRect(8, 158, 80, 27, 6,
+                                  BUTTON_COLORS[buttonColorIndex]);
+  screenFrameBuffer.drawRoundRect(8, 158, 80, 27, 6, 0x4208);
+  screenFrameBuffer.setTextDatum(MC_DATUM);
+  screenFrameBuffer.setTextColor(TFT_WHITE, BUTTON_COLORS[buttonColorIndex]);
+  screenFrameBuffer.drawString(label, 48, 172, 2);
+}
+
+void drawTimerPanel(uint32_t now) {
+  if (timerState == TimerState::Expired) {
+    const uint16_t phase = now % 1200;
+    const uint16_t pulse = phase < 600 ? phase : 1200 - phase;
+    const uint8_t green = 48 + pulse * 176 / 600;
+    const uint16_t orange = screenFrameBuffer.color565(255, green, 0);
+    screenFrameBuffer.fillRect(0, 0, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT,
+                               orange);
+    screenFrameBuffer.setTextDatum(MC_DATUM);
+    screenFrameBuffer.setTextColor(TFT_WHITE, orange);
+    screenFrameBuffer.setTextSize(3);
+    screenFrameBuffer.drawString("Time", DISPLAY_WIDTH / 4, 72, 2);
+    screenFrameBuffer.drawString("is", DISPLAY_WIDTH / 4, 120, 2);
+    screenFrameBuffer.drawString("up", DISPLAY_WIDTH / 4, 168, 2);
+    screenFrameBuffer.setTextSize(1);
+    return;
   }
-  shiftPetPanel(screenFrameBuffer, petTransitionOffset(now));
-  drawAudioSpectrum(screenFrameBuffer, now, streamActive,
-                    audioSpectrumEnabled);
-  const bool wifiConnected = WiFi.status() == WL_CONNECTED;
-  const String wifiLabel =
-      wifiConnected ? "Wi-Fi " + String(WiFi.RSSI()) + " dBm" : "Wi-Fi OFF";
-  screenFrameBuffer.setTextDatum(TL_DATUM);
-  screenFrameBuffer.setTextColor(wifiConnected ? SUCCESS : TEXT_MUTED, 0x0841);
-  screenFrameBuffer.drawString(wifiLabel, 2, 2, 1);
+
+  screenFrameBuffer.fillRect(0, 0, CAT_PANEL_WIDTH, 195, 0x0841);
+  screenFrameBuffer.setTextDatum(MC_DATUM);
+  screenFrameBuffer.setTextColor(TFT_CYAN, 0x0841);
+  switch (timerState) {
+    case TimerState::Ready:
+      screenFrameBuffer.drawString("SET TIMER", 48, 25, 1);
+      break;
+    case TimerState::Running:
+      screenFrameBuffer.drawString("RUNNING", 48, 25, 1);
+      break;
+    case TimerState::Paused:
+      screenFrameBuffer.drawString("PAUSED", 48, 25, 1);
+      break;
+    case TimerState::Expired:
+      return;
+    case TimerState::Inactive:
+      return;
+  }
+
+  if (timerState == TimerState::Ready || timerState == TimerState::Paused) {
+    drawTimerAdjustButton(4, 39, true, "1m");
+    drawTimerAdjustButton(49, 39, true, "10s");
+  }
+
+  const uint32_t remainingSeconds = (timerRemainingMs(now) + 999) / 1000;
+  screenFrameBuffer.setTextColor(TFT_WHITE, 0x0841);
+  if (remainingSeconds < 60) {
+    char seconds[3];
+    snprintf(seconds, sizeof(seconds), "%02lu",
+             static_cast<unsigned long>(remainingSeconds));
+    screenFrameBuffer.setTextSize(3);
+    screenFrameBuffer.drawString(seconds, 48, 91, 2);
+    screenFrameBuffer.setTextSize(1);
+  } else {
+    char countdown[6];
+    snprintf(countdown, sizeof(countdown), "%02lu:%02lu",
+             static_cast<unsigned long>(remainingSeconds / 60),
+             static_cast<unsigned long>(remainingSeconds % 60));
+    screenFrameBuffer.setTextSize(2);
+    screenFrameBuffer.drawString(countdown, 48, 91, 2);
+    screenFrameBuffer.setTextSize(1);
+  }
+
+  if (timerState == TimerState::Ready || timerState == TimerState::Paused) {
+    drawTimerAdjustButton(4, 123, false, "1m");
+    drawTimerAdjustButton(49, 123, false, "10s");
+    drawTimerActionButton("START");
+  } else {
+    drawTimerActionButton("STOP");
+  }
+}
+
+void drawCatFrame(uint32_t now, bool pushFullFrame = false) {
+  const bool timerExpired = timerState == TimerState::Expired;
+  if (timerModeActive()) {
+    drawTimerPanel(now);
+  } else {
+    const Pet &pet = petList[displayedPetIndex];
+    if (pet.drawingIndex < 0) {
+      drawFatCat(screenFrameBuffer, now, pet.animalName, petDance, petOutfit);
+    } else {
+      drawPet(screenFrameBuffer, now, pet, petDance, petOutfit);
+    }
+    if (bubbleVisible) {
+      drawSpeechBubble(screenFrameBuffer,
+                       bubbleTexts[bubblePetIndex][bubbleTextIndex]);
+    }
+  }
+  if (!timerExpired) {
+    shiftPetPanel(screenFrameBuffer, petTransitionOffset(now));
+    drawAudioSpectrum(screenFrameBuffer, now, streamActive,
+                      audioSpectrumEnabled);
+    const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+    const String wifiLabel =
+        wifiConnected ? "Wi-Fi " + String(WiFi.RSSI()) + " dBm" : "Wi-Fi OFF";
+    screenFrameBuffer.setTextDatum(TL_DATUM);
+    screenFrameBuffer.setTextColor(wifiConnected ? SUCCESS : TEXT_MUTED,
+                                   0x0841);
+    screenFrameBuffer.drawString(wifiLabel, 2, 2, 1);
+  }
   if (pushFullFrame) {
     screenFrameBuffer.pushSprite(0, 0);
   } else {
-    screenFrameBuffer.pushSprite(0, 0, 0, 0, CAT_PANEL_WIDTH,
+    screenFrameBuffer.pushSprite(0, 0, 0, 0,
+                                 timerExpired ? DISPLAY_WIDTH / 2
+                                              : CAT_PANEL_WIDTH,
                                  DISPLAY_HEIGHT);
   }
 }
@@ -435,6 +699,50 @@ String fittedText(const String &source, int16_t maxWidth, uint8_t font = 2) {
     result.remove(result.length() - 1);
   }
   return result + "...";
+}
+
+struct TwoLineText {
+  String first;
+  String second;
+};
+
+TwoLineText wrappedText(const String &source, int16_t maxWidth,
+                        uint8_t font = 2) {
+  TwoLineText lines;
+  String remaining = source;
+  for (uint8_t line = 0; line < 2 && !remaining.isEmpty(); ++line) {
+    int16_t fitLength = remaining.length();
+    while (fitLength > 0 &&
+           renderTarget->textWidth(remaining.substring(0, fitLength), font) >
+               maxWidth) {
+      --fitLength;
+    }
+
+    if (fitLength == remaining.length()) {
+      (line == 0 ? lines.first : lines.second) = remaining;
+      break;
+    }
+    if (fitLength == 0) {
+      (line == 0 ? lines.first : lines.second) =
+          fittedText(remaining, maxWidth, font);
+      break;
+    }
+
+    int16_t splitAt = remaining.lastIndexOf(' ', fitLength - 1);
+    if (splitAt <= 0) {
+      splitAt = fitLength;
+    }
+    (line == 0 ? lines.first : lines.second) =
+        remaining.substring(0, splitAt);
+    remaining = remaining.substring(splitAt);
+    while (remaining.startsWith(" ")) {
+      remaining.remove(0, 1);
+    }
+    if (line == 1 && !remaining.isEmpty()) {
+      lines.second = fittedText(lines.second + " " + remaining, maxWidth, font);
+    }
+  }
+  return lines;
 }
 
 String passwordForDisplay(const String &password) {
@@ -624,6 +932,8 @@ void drawHome() {
   display.setTextDatum(TR_DATUM);
   display.setTextColor(primaryTextColor(), backgroundColor);
   display.drawString(clockText, UI_LEFT + UI_WIDTH, 2, 1);
+  drawButton(UI_LEFT + UI_WIDTH - 48, 14, 48, 16, "TIMER",
+             PANEL_LIGHT, TFT_WHITE, 1);
 
   const bool connected = WiFi.status() == WL_CONNECTED;
   const uint32_t bitrateKbps =
@@ -641,14 +951,18 @@ void drawHome() {
                         ? (streamStation.isEmpty() ? statusMessage
                                                    : streamStation)
                         : streamTitle;
-  display.drawString(fittedText(subtitle, UI_WIDTH - 14, 2), UI_LEFT + 7, 58,
-                     2);
+  const TwoLineText titleLines =
+      wrappedText(subtitle, UI_WIDTH - 14, 2);
+  display.drawString(titleLines.first, UI_LEFT + 7, 58, 2);
+  if (!titleLines.second.isEmpty()) {
+    display.drawString(titleLines.second, UI_LEFT + 7, 74, 2);
+  }
   display.setTextDatum(TR_DATUM);
   display.setTextColor(TEXT_MUTED, PANEL);
   display.drawString(bitrateKbps == 0
                          ? "-- kbit/s"
                          : String(bitrateKbps) + " kbit/s",
-                     UI_LEFT + UI_WIDTH - 7, 83, 1);
+                     UI_LEFT + UI_WIDTH - 7, 91, 1);
 
   drawButton(UI_LEFT, 105, 49, 36, "|<", PANEL_LIGHT);
   drawButton(UI_LEFT + 55, 105, 100, 36,
@@ -670,6 +984,32 @@ void drawHome() {
 
   drawButton(UI_LEFT, 190, 99, 36, "STATIONS", PANEL_LIGHT);
   drawButton(UI_LEFT + 105, 190, 105, 36, "MENU", PANEL_LIGHT);
+}
+
+void handleTimerTouch(int16_t x, int16_t y, uint32_t now) {
+  if ((timerState == TimerState::Ready || timerState == TimerState::Paused) &&
+      pointInRect(x, y, 4, 39, 43, 25)) {
+    changeTimerDuration(60);
+  } else if ((timerState == TimerState::Ready ||
+              timerState == TimerState::Paused) &&
+             pointInRect(x, y, 49, 39, 43, 25)) {
+    changeTimerDuration(10);
+  } else if ((timerState == TimerState::Ready ||
+              timerState == TimerState::Paused) &&
+             pointInRect(x, y, 4, 123, 43, 25)) {
+    changeTimerDuration(-60);
+  } else if ((timerState == TimerState::Ready ||
+              timerState == TimerState::Paused) &&
+             pointInRect(x, y, 49, 123, 43, 25)) {
+    changeTimerDuration(-10);
+  } else if (pointInRect(x, y, 8, 158, 80, 27)) {
+    if (timerState == TimerState::Running ||
+        timerState == TimerState::Expired) {
+      stopOrConfirmTimer(now);
+    } else {
+      startTimer(now);
+    }
+  }
 }
 
 void drawSettings() {
@@ -811,6 +1151,26 @@ void updateRgbLed(uint32_t now) {
     return;
   }
   lastRgbLedUpdateAt = now;
+
+  if (timerModeActive()) {
+    if (!rgbLedEnabled) {
+      setRgbLedOutput(0);
+      return;
+    }
+    const uint32_t totalMs = max<uint32_t>(timerDurationSeconds * 1000, 1);
+    const uint32_t remainingMs = timerRemainingMs(now);
+    const uint32_t periodMs =
+        500 + 2500 * min<uint32_t>(remainingMs, totalMs) / totalMs;
+    const uint32_t phase = now % periodMs;
+    const uint32_t halfPeriod = periodMs / 2;
+    const uint32_t distance =
+        phase < halfPeriod ? phase : periodMs - phase;
+    const uint32_t ramp = distance * 255 / halfPeriod;
+    const uint8_t brightness =
+        static_cast<uint8_t>(20 + (ramp * ramp * 140) / (255 * 255));
+    setRgbLedOutput(brightness);
+    return;
+  }
 
   if (!rgbLedEnabled) {
     setRgbLedOutput(0);
@@ -1475,6 +1835,12 @@ void startStream() {
     setStatus("No stations available");
     return;
   }
+  if (timerState == TimerState::Expired ||
+      (timerState == TimerState::Running &&
+       timerRemainingMs(millis()) <= TIMER_MUSIC_CUTOFF_MS)) {
+    setStatus("Timer: music stopped");
+    return;
+  }
   if (WiFi.status() != WL_CONNECTED) {
     setStatus(wifiSsid.isEmpty() ? "Set up Wi-Fi" : "Wi-Fi not connected");
     return;
@@ -1962,12 +2328,25 @@ void handleTouch(int16_t x, int16_t y) {
   updateScreenLayout();
   switch (currentScreen) {
     case Screen::Home:
+      if (timerState == TimerState::Expired &&
+          pointInRect(x, y, 0, 0, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT)) {
+        pressTimerButton(millis());
+        return;
+      }
       if (pointInRect(x, y, 0, 195, CAT_PANEL_WIDTH, 45)) {
         setAudioSpectrum(!audioSpectrumEnabled);
         return;
       }
+      if (pointInRect(x, y, UI_LEFT + UI_WIDTH - 48, 14, 48, 16)) {
+        pressTimerButton(millis());
+        return;
+      }
       if (pointInRect(x, y, 0, 0, CAT_PANEL_WIDTH, 195)) {
-        chooseDifferentPet(millis());
+        if (timerModeActive()) {
+          handleTimerTouch(x, y, millis());
+        } else {
+          chooseDifferentPet(millis());
+        }
         return;
       }
       handleHomeTouch(x, y);
@@ -2180,6 +2559,9 @@ void setup() {
   buttonColorIndex = min<uint8_t>(
       preferences.getUChar("buttonColor", DEFAULT_BUTTON_COLOR),
       BUTTON_COLOR_COUNT - 1);
+  timerDurationSeconds = min<uint32_t>(
+      preferences.getUInt("timerSecs", DEFAULT_TIMER_SECONDS),
+      MAX_TIMER_SECONDS);
 #if defined(BOARD_FREENOVE_FNK0114L)
   rgbLedEnabled = preferences.getBool("rgbEnabled", false);
   rgbLedPulseEnabled = preferences.getBool("rgbPulse", false);
@@ -2259,17 +2641,20 @@ void loop() {
 #if defined(BOARD_FREENOVE_FNK0114L)
   updateRgbLed(now);
 #endif
+  updateTimer(now);
   if (streamRestartPending && WiFi.status() == WL_CONNECTED &&
       stationCount > 0 &&
       now - streamRestartAt >= STREAM_RETRY_DELAY_MS) {
     Serial.println("audio: retrying ended stream.");
     startStream();
   }
-  if (now - lastPetChangeAt >= RANDOM_PET_INTERVAL_MS) {
-    chooseDifferentPet(now);
+  if (!timerModeActive()) {
+    if (now - lastPetChangeAt >= RANDOM_PET_INTERVAL_MS) {
+      chooseDifferentPet(now);
+    }
+    updatePetAnimation(now);
+    updateBubbleText(now);
   }
-  updatePetAnimation(now);
-  updateBubbleText(now);
   if (currentScreen == Screen::Home &&
       now - lastClockUpdateAt >= CLOCK_UPDATE_INTERVAL_MS) {
     lastClockUpdateAt = now;

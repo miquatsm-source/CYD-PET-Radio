@@ -49,8 +49,22 @@ The home screen provides station navigation, play/pause, and a touchscreen
 volume slider. The top-right corner shows the current Europe/Berlin time and
 date. Wi-Fi status and signal strength appear to the left of the **PET RADIO**
 heading. Station name and stream title appear below the heading, with bitrate
-under the title. The clock synchronizes over the internet using NTP; until
-synchronization, it shows placeholder dashes.
+under the title. Long stream titles wrap onto a second line before the bitrate.
+The clock synchronizes over the internet using NTP; until synchronization, it
+shows placeholder dashes.
+
+Tap **TIMER** in the upper-right corner to replace the pet animation with a
+countdown. Set time in one-minute and ten-second steps, then tap **START**.
+**STOP** pauses the countdown; **START** resumes it. Music stops five seconds
+before the timer ends, when a quiet chime plays at a level proportional to the
+configured music volume. The timer remains visible for one minute after it
+expires with a pulsing orange **Time is up** display. Tap that display or
+**TIMER** to end the timer, stop the chime, and resume the music that the timer
+stopped; **STOP** also confirms the end and restores the pets. Tapping **TIMER**
+before expiry cancels the countdown and restores the pets immediately.
+On the FNK0114L, the rear RGB LED (when enabled in the RGB LED settings) pulses
+faster as the timer approaches zero. The CYD has no confirmed compatible rear
+RGB LED, so timer lighting is disabled there.
 
 Choose one of five dark background colors in **MENU**. The selection is saved
 across restarts, and interface text remains white for readability.
@@ -77,8 +91,9 @@ assignments can differ between board revisions.
 
 The built-in DAC has only 8 bits, which causes audible hiss. Enable **NOISE
 SHAPE** in **MENU** to shift the quantization noise to higher frequencies where
-it is less audible. Every stream start also fades in over about a quarter of a
-second to reduce clicks when switching stations.
+it is less audible. At each stream start, audio stays muted until the first
+non-silent decoded sample, remains muted for one second, and then fades in over
+750 ms to reduce clicks when switching stations.
 
 The Wi-Fi connection scans every 2.4 GHz channel and reports whether the SSID
 was not found or WPA2 authentication failed. If the connection still fails,
