@@ -37,6 +37,7 @@ constexpr uint16_t CAT_FRAME_INTERVAL_MS = FAT_CAT_FRAME_INTERVAL_MS;
 constexpr uint16_t TOUCH_DEBOUNCE_MS = 180;
 constexpr uint32_t WIFI_TIMEOUT_MS = 25000;
 constexpr uint32_t WIFI_RECONNECT_DELAY_MS = 30000;
+constexpr int AUDIO_INPUT_BUFFER_BYTES = 20000;
 constexpr uint32_t STREAM_RETRY_DELAY_MS = 3000;
 constexpr uint16_t CLOCK_UPDATE_INTERVAL_MS = 60000;
 constexpr uint16_t BITRATE_UPDATE_INTERVAL_MS = 1000;
@@ -2674,6 +2675,9 @@ void setup() {
   }
 #endif
 
+  // Without PSRAM the library defaults to ~6 KB, which underruns whenever the
+  // display refresh delays radioAudio.loop().
+  radioAudio.setBufsize(AUDIO_INPUT_BUFFER_BYTES, 0);
   radioAudio.forceMono(true);
   const int8_t audioGain = audioBoost ? AUDIO_BOOST_DB : 0;
   radioAudio.setTone(audioGain, audioGain, audioGain);
