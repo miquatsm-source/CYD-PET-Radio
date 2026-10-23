@@ -69,14 +69,14 @@ On the FNK0114L, the rear RGB LED (when enabled in the RGB LED settings) pulses
 faster as the timer approaches zero. The CYD has no confirmed compatible rear
 RGB LED, so timer lighting is disabled there.
 
-Choose one of five dark background colors in **MENU > DISPLAY & TOUCH**. The
+Choose one of ten dark background colors in **MENU > DISPLAY & TOUCH**. The
 selection is saved across restarts, and interface text remains white for
 readability. The **BUTTONS** swatches on the same page independently choose
-the button fill: charcoal, deep blue, teal, plum, or bronze. These muted dark
-colors keep white labels readable on both supported displays. The choice
-applies to play/pause and all toggle buttons, regardless of whether a toggle
-is on or off, and is saved across restarts. The volume slider track uses the
-selected button color as well.
+the button fill from ten muted accent colors. These dark colors keep white
+labels readable on both supported displays. The choice applies to play/pause
+and all toggle buttons, regardless of whether a toggle is on or off, and is
+saved across restarts. The volume slider track uses the selected button color
+as well.
 
 Enable optional dynamic audio compression in **MENU > AUDIO** to boost quieter
 audio while controlling loud peaks. This can make streaming volume more

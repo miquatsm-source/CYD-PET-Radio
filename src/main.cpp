@@ -73,10 +73,11 @@ constexpr char BERLIN_TIMEZONE[] = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 constexpr uint16_t PANEL = 0x18E3;
 constexpr uint16_t PANEL_LIGHT = 0x2945;
 constexpr uint16_t ACCENT = 0x05BF;
-constexpr uint8_t THEME_COLOR_COUNT = 5;
+constexpr uint8_t THEME_COLOR_COUNT = 10;
 constexpr uint8_t DEFAULT_THEME_COLOR = 1;
-constexpr uint8_t BUTTON_COLOR_COUNT = 5;
+constexpr uint8_t BUTTON_COLOR_COUNT = 10;
 constexpr uint8_t DEFAULT_BUTTON_COLOR = 0;
+constexpr uint8_t COLORS_PER_ROW = 5;
 #if defined(BOARD_FREENOVE_FNK0114L)
 constexpr uint8_t RGB_LED_RED_PIN = 22;
 constexpr uint8_t RGB_LED_GREEN_PIN = 16;
@@ -104,9 +105,10 @@ constexpr int16_t MENU_THEME_SWATCH_HEIGHT = 20;
 constexpr int16_t MENU_THEME_SWATCH_GAP = 8;
 constexpr uint16_t THEME_COLORS[THEME_COLOR_COUNT] = {
     COLOR_DARK_BLUE, COLOR_DARK_GREY, COLOR_DARK_GREEN, COLOR_DARK_RED,
-    COLOR_DARK_SLATE};
+    COLOR_DARK_SLATE, 0x1865, 0x0925, 0x1901, 0x2843, 0x20E2};
 constexpr uint16_t BUTTON_COLORS[BUTTON_COLOR_COUNT] = {
-    0x2945, 0x1908, 0x1A28, 0x4148, 0x5182};
+    0x2945, 0x1908, 0x1A28, 0x4148, 0x5182, 0x0372, 0x680A, 0x8A81,
+    0x0B26, 0x496F};
 constexpr uint16_t TEXT_MUTED = 0x9CF3;
 constexpr uint16_t SUCCESS = 0x4FE7;
 constexpr uint16_t ERROR_COLOUR = 0xF986;
@@ -867,8 +869,8 @@ uint16_t primaryTextColor() {
 
 int16_t themeSwatchX(uint8_t index) {
   const int16_t paletteWidth =
-      THEME_COLOR_COUNT * themeSwatchWidth +
-      (THEME_COLOR_COUNT - 1) * themeSwatchGap;
+      COLORS_PER_ROW * themeSwatchWidth +
+      (COLORS_PER_ROW - 1) * themeSwatchGap;
   return UI_LEFT + (UI_WIDTH - paletteWidth) / 2 +
          index * (themeSwatchWidth + themeSwatchGap);
 }
@@ -956,6 +958,11 @@ void drawPanelHeader(const String &title) {
   display.setTextColor(TFT_CYAN, backgroundColor);
   display.drawString(title, UI_LEFT, 9, 2);
   display.drawFastHLine(UI_LEFT, 31, UI_WIDTH, 0x4208);
+}
+
+void drawMenuBackButton() {
+  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
+             TFT_WHITE, 1);
 }
 
 // Select the most useful Wi-Fi status text for the current connection state.
@@ -1070,8 +1077,7 @@ void handleTimerTouch(int16_t x, int16_t y, uint32_t now) {
 // Draw the settings category menu.
 void drawSettings() {
   drawPanelHeader("SETTINGS");
-  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
-             TFT_WHITE, 1);
+  drawMenuBackButton();
   const int16_t rowStep = SETTINGS_ITEM_HEIGHT + SETTINGS_ITEM_GAP;
   const char *labels[] = {"AUDIO", "DISPLAY & TOUCH", "WI-FI", "STATIONS"};
   for (uint8_t row = 0; row < 4; ++row) {
@@ -1090,8 +1096,7 @@ void drawSettings() {
 void drawAudioSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("AUDIO");
-  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
-             TFT_WHITE, 1);
+  drawMenuBackButton();
   const String labels[] = {
       String("AUDIO BOOST +6 dB: ") + (audioBoost ? "ON" : "OFF"),
       String("SPECTRUM: ") + (audioSpectrumEnabled ? "ON" : "OFF"),
@@ -1124,33 +1129,36 @@ void drawAudioSettings() {
 void drawDisplaySettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("DISPLAY & TOUCH");
-  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
-             TFT_WHITE, 1);
+  drawMenuBackButton();
   display.setTextDatum(TL_DATUM);
   display.setTextColor(primaryTextColor(), backgroundColor);
-  display.drawString("BACKGROUND", UI_LEFT, 39, 2);
-  constexpr int16_t SWATCH_Y = 61;
-  constexpr int16_t SWATCH_HEIGHT = 32;
+  display.drawString("BACKGROUND", UI_LEFT, 35, 2);
+  constexpr int16_t BACKGROUND_SWATCH_Y = 53;
+  constexpr int16_t BUTTON_SWATCH_Y = 128;
+  constexpr int16_t SWATCH_HEIGHT = 24;
+  constexpr int16_t SWATCH_ROW_STEP = 29;
   for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
-    const int16_t swatchX = themeSwatchX(index);
-    display.fillRoundRect(swatchX, SWATCH_Y, themeSwatchWidth, SWATCH_HEIGHT,
-                          4, THEME_COLORS[index]);
+    const int16_t swatchX = themeSwatchX(index % COLORS_PER_ROW);
+    const int16_t swatchY =
+        BACKGROUND_SWATCH_Y + (index / COLORS_PER_ROW) * SWATCH_ROW_STEP;
+    display.fillRoundRect(swatchX, swatchY, themeSwatchWidth, SWATCH_HEIGHT, 4,
+                          THEME_COLORS[index]);
     display.drawRoundRect(
-        swatchX - 1, SWATCH_Y - 1, themeSwatchWidth + 2, SWATCH_HEIGHT + 2,
-        5, index == themeColorIndex ? primaryTextColor() : 0x4208);
+        swatchX - 1, swatchY - 1, themeSwatchWidth + 2, SWATCH_HEIGHT + 2, 5,
+        index == themeColorIndex ? primaryTextColor() : 0x4208);
   }
-  display.drawString("BUTTONS", UI_LEFT, 108, 2);
-  constexpr int16_t BUTTON_SWATCH_Y = 130;
+  display.drawString("BUTTONS", UI_LEFT, 110, 2);
   for (uint8_t index = 0; index < BUTTON_COLOR_COUNT; ++index) {
-    const int16_t swatchX = themeSwatchX(index);
-    display.fillRoundRect(swatchX, BUTTON_SWATCH_Y, themeSwatchWidth,
-                          SWATCH_HEIGHT, 4, BUTTON_COLORS[index]);
+    const int16_t swatchX = themeSwatchX(index % COLORS_PER_ROW);
+    const int16_t swatchY =
+        BUTTON_SWATCH_Y + (index / COLORS_PER_ROW) * SWATCH_ROW_STEP;
+    display.fillRoundRect(swatchX, swatchY, themeSwatchWidth, SWATCH_HEIGHT, 4,
+                          BUTTON_COLORS[index]);
     display.drawRoundRect(
-        swatchX - 1, BUTTON_SWATCH_Y - 1, themeSwatchWidth + 2,
-        SWATCH_HEIGHT + 2, 5,
+        swatchX - 1, swatchY - 1, themeSwatchWidth + 2, SWATCH_HEIGHT + 2, 5,
         index == buttonColorIndex ? primaryTextColor() : 0x4208);
   }
-  drawButton(UI_LEFT, 184, UI_WIDTH, 42, "RECALIBRATE TOUCHSCREEN",
+  drawButton(UI_LEFT, 194, UI_WIDTH, 36, "RECALIBRATE TOUCHSCREEN",
              PANEL_LIGHT, TFT_WHITE, 2, false);
 }
 
@@ -1159,8 +1167,7 @@ void drawDisplaySettings() {
 void drawRgbLedSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("RGB LED OPTIONS");
-  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
-             TFT_WHITE, 1);
+  drawMenuBackButton();
   drawButton(UI_LEFT, 48, UI_WIDTH, 32,
              String("LED: ") + (rgbLedEnabled ? "ON" : "OFF"),
              PANEL_LIGHT, TFT_WHITE, 2);
@@ -1305,15 +1312,18 @@ void setRgbLedColor(uint8_t index) {
 void drawWifiSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("WI-FI SETTINGS");
+  drawMenuBackButton();
+  const int16_t labelLeft = UI_LEFT + 6;
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
-  display.drawString("NETWORK NAME (SSID)", UI_LEFT + 6, 37, 2);
+  display.drawString("NETWORK NAME (SSID)", labelLeft, 37, 2);
   drawButton(UI_LEFT, 55, UI_WIDTH, 39,
              fittedText(wifiSsid.isEmpty() ? "(Enter SSID)" : wifiSsid,
                         UI_WIDTH - 16, 2),
              PANEL, TFT_WHITE, 2, false);
+  display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
-  display.drawString("PASSWORD", UI_LEFT + 6, 100, 2);
+  display.drawString("PASSWORD", labelLeft, 100, 2);
   String passwordPreview = passwordForDisplay(wifiPassword);
   if (wifiPassword.isEmpty()) {
     passwordPreview = "(Enter password)";
@@ -1325,11 +1335,8 @@ void drawWifiSettings() {
   drawButton(UI_LEFT, 157, UI_WIDTH, 34,
              String("SHOW PASSWORD: ") + (showWifiPassword ? "ON" : "OFF"),
              showWifiPassword ? 0x2147 : PANEL, TFT_WHITE, 2, false);
-  const int16_t actionWidth = (UI_WIDTH - 8) / 2;
-  drawButton(UI_LEFT, 198, actionWidth, 32, "CONNECT",
+  drawButton(UI_LEFT, 198, UI_WIDTH, 32, "CONNECT",
              wifiConnecting ? 0x3186 : ACCENT, TFT_WHITE, 2, false);
-  drawButton(UI_LEFT + actionWidth + 8, 198, actionWidth, 32, "BACK",
-             PANEL_LIGHT, TFT_WHITE, 2, false);
   drawText(fittedText(wifiStatusText(), UI_WIDTH, 1), UI_LEFT, 231, 1,
            WiFi.status() == WL_CONNECTED ? SUCCESS : TEXT_MUTED);
 }
@@ -1338,8 +1345,7 @@ void drawWifiSettings() {
 void drawStations() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("STATION LIST");
-  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
-             TFT_WHITE, 1);
+  drawMenuBackButton();
   const uint8_t pageCount = stationPageCount();
   const uint8_t pageStart = stationListPage * STATIONS_PER_PAGE;
   const uint8_t visibleStations =
@@ -2584,23 +2590,31 @@ void handleTouch(int16_t x, int16_t y) {
     case Screen::DisplaySettings: {
       if (pointOnMenuBackButton(x, y)) {
         currentScreen = Screen::Settings;
-      } else if (pointInRect(x, y, UI_LEFT, 61, UI_WIDTH, 34)) {
+      } else if (pointInRect(x, y, UI_LEFT, 51, UI_WIDTH, 56)) {
+        constexpr int16_t BACKGROUND_SWATCH_Y = 53;
+        constexpr int16_t SWATCH_ROW_STEP = 29;
         for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
-          if (pointInRect(x, y, themeSwatchX(index) - 2, 60,
-                          themeSwatchWidth + 4, 34)) {
+          const int16_t swatchY =
+              BACKGROUND_SWATCH_Y + (index / COLORS_PER_ROW) * SWATCH_ROW_STEP;
+          if (pointInRect(x, y, themeSwatchX(index % COLORS_PER_ROW) - 2,
+                          swatchY - 2, themeSwatchWidth + 4, 28)) {
             setThemeColor(index);
             break;
           }
         }
-      } else if (pointInRect(x, y, UI_LEFT, 130, UI_WIDTH, 34)) {
+      } else if (pointInRect(x, y, UI_LEFT, 126, UI_WIDTH, 57)) {
+        constexpr int16_t BUTTON_SWATCH_Y = 128;
+        constexpr int16_t SWATCH_ROW_STEP = 29;
         for (uint8_t index = 0; index < BUTTON_COLOR_COUNT; ++index) {
-          if (pointInRect(x, y, themeSwatchX(index) - 2, 129,
-                          themeSwatchWidth + 4, 34)) {
+          const int16_t swatchY =
+              BUTTON_SWATCH_Y + (index / COLORS_PER_ROW) * SWATCH_ROW_STEP;
+          if (pointInRect(x, y, themeSwatchX(index % COLORS_PER_ROW) - 2,
+                          swatchY - 2, themeSwatchWidth + 4, 28)) {
             setButtonColor(index);
             break;
           }
         }
-      } else if (pointInRect(x, y, UI_LEFT, 184, UI_WIDTH, 42)) {
+      } else if (pointInRect(x, y, UI_LEFT, 194, UI_WIDTH, 36)) {
         calibrateTouchscreen();
       }
       markUiDirty();
@@ -2636,21 +2650,20 @@ void handleTouch(int16_t x, int16_t y) {
     }
 #endif
     case Screen::Wifi:
-      if (pointInRect(x, y, UI_LEFT, 55, UI_WIDTH, 39)) {
+      if (pointOnMenuBackButton(x, y)) {
+        currentScreen = Screen::Settings;
+        markUiDirty();
+      } else if (pointInRect(x, y, UI_LEFT, 55, UI_WIDTH, 39)) {
         beginKeyboard(KeyboardTarget::Ssid);
       } else if (pointInRect(x, y, UI_LEFT, 118, UI_WIDTH, 39)) {
         beginKeyboard(KeyboardTarget::Password);
       } else if (pointInRect(x, y, UI_LEFT, 157, UI_WIDTH, 38)) {
         showWifiPassword = !showWifiPassword;
         markUiDirty();
-      } else if (pointInRect(x, y, UI_LEFT, 198, (UI_WIDTH - 8) / 2, 32)) {
+      } else if (pointInRect(x, y, UI_LEFT, 198, UI_WIDTH, 32)) {
         if (saveWifiCredentials()) {
           beginWifiConnection();
         }
-      } else if (pointInRect(x, y, UI_LEFT + (UI_WIDTH - 8) / 2 + 8, 198,
-                             (UI_WIDTH - 8) / 2, 32)) {
-        currentScreen = Screen::Settings;
-        markUiDirty();
       }
       break;
     case Screen::Stations:
