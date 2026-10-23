@@ -15,5 +15,5 @@ constexpr uint8_t PET_COUNT = 11;
 
 extern const Pet petList[PET_COUNT];
 
-void drawPet(TFT_eSprite &frameBuffer, uint32_t now, const Pet &pet,
+void drawPet(TFT_eSPI &frameBuffer, uint32_t now, const Pet &pet,
              PetDance dance, PetOutfit outfit);

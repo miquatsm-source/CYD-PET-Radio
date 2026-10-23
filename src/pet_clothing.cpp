@@ -11,7 +11,7 @@ constexpr uint16_t BOOT_BROWN = 0x8200;
 
 // Draw the selected outfit over a pet, using the current bob offset to keep
 // clothing aligned with its animated body.
-void drawPetClothing(TFT_eSprite &frameBuffer, uint8_t animalIndex,
+void drawPetClothing(TFT_eSPI &frameBuffer, uint8_t animalIndex,
                      PetOutfit outfit, int16_t bob) {
   static const int16_t faceX[] = {48, 48, 48, 74, 66, 48, 48, 48, 77, 58};
   static const int16_t faceY[] = {112, 98, 95, 145, 72,
@@ -28,7 +28,7 @@ void drawPetClothing(TFT_eSprite &frameBuffer, uint8_t animalIndex,
                                TFT_YELLOW);
       break;
     case PetOutfit::Sunglasses: {
-      if (animalIndex == 0 || animalIndex == 9) {
+      if (animalIndex == 0 || animalIndex == 2 || animalIndex == 9) {
         break;
       }
       const uint8_t index = animalIndex < 10 ? animalIndex : 5;

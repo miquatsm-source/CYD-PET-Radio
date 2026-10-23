@@ -13,8 +13,8 @@ constexpr uint16_t EYE_COLOUR = 0x07E0;
 
 // Render the built-in cat using the same dance timing and outfit system as the
 // other pets, while keeping its dedicated full-panel artwork.
-void drawFatCat(TFT_eSprite &frameBuffer, uint32_t now, const char *petName,
-                PetDance dance, PetOutfit outfit) {
+void drawFatCat(TFT_eSPI &frameBuffer, uint32_t now, PetDance dance,
+                PetOutfit outfit) {
   const uint8_t pose = (now / FAT_CAT_FRAME_INTERVAL_MS) % 12;
   static const int8_t bounce[] = {0, -2, -5, -8, -10, -8,
                                   -5, -2, 0, 2, 1, 0};
@@ -37,14 +37,12 @@ void drawFatCat(TFT_eSprite &frameBuffer, uint32_t now, const char *petName,
   const int16_t headX = 48 + (dance == PetDance::Sway ? sway[pose] : 0);
   const int16_t headY = 108 + bob;
   const int16_t bodyY = 132 + bob;
+  const bool blinking = isPetBlinking(now, 0);
 
   frameBuffer.fillRect(0, 0, FAT_CAT_PANEL_WIDTH, 195, PANEL_COLOUR);
   frameBuffer.drawFastHLine(0, 193, FAT_CAT_PANEL_WIDTH, 0x3186);
   frameBuffer.fillCircle(15, 44, 1, TFT_YELLOW);
   frameBuffer.fillCircle(77, 105, 1, TFT_YELLOW);
-  frameBuffer.setTextDatum(MC_DATUM);
-  frameBuffer.setTextColor(TFT_CYAN, PANEL_COLOUR);
-  frameBuffer.drawString(petName, 48, 18, 2);
 
   frameBuffer.drawLine(68, bodyY + 24, 81, bodyY + 17 + bob / 2, FUR_SHADOW);
   frameBuffer.drawLine(81, bodyY + 17 + bob / 2, 86, bodyY + 10 + bob / 2,
@@ -70,10 +68,15 @@ void drawFatCat(TFT_eSprite &frameBuffer, uint32_t now, const char *petName,
   frameBuffer.fillCircle(72, bodyY + arms[(pose + 6) % 12], 4, BELLY_COLOUR);
 
   frameBuffer.fillCircle(headX, headY, 20, FUR_COLOUR);
-  frameBuffer.fillCircle(41, headY + 1, 2, EYE_COLOUR);
-  frameBuffer.fillCircle(55, headY + 1, 2, EYE_COLOUR);
-  frameBuffer.fillCircle(41, headY + 1, 1, TFT_BLACK);
-  frameBuffer.fillCircle(55, headY + 1, 1, TFT_BLACK);
+  if (blinking) {
+    frameBuffer.drawFastHLine(headX - 9, headY + 1, 6, FUR_SHADOW);
+    frameBuffer.drawFastHLine(headX + 3, headY + 1, 6, FUR_SHADOW);
+  } else {
+    frameBuffer.fillCircle(headX - 7, headY + 1, 2, EYE_COLOUR);
+    frameBuffer.fillCircle(headX + 7, headY + 1, 2, EYE_COLOUR);
+    frameBuffer.fillCircle(headX - 7, headY + 1, 1, TFT_BLACK);
+    frameBuffer.fillCircle(headX + 7, headY + 1, 1, TFT_BLACK);
+  }
   frameBuffer.fillTriangle(45, headY + 7, 51, headY + 7, 48, headY + 10,
                        INNER_EAR);
   frameBuffer.drawLine(48, headY + 10, 45, headY + 13, TFT_BLACK);

@@ -18,14 +18,11 @@ enum PetDrawingIndex : uint8_t {
   HansiPet
 };
 
-void drawFrame(TFT_eSprite &frameBuffer, const char *petName) {
+void drawFrame(TFT_eSPI &frameBuffer) {
   frameBuffer.fillRect(0, 0, FAT_CAT_PANEL_WIDTH, 193, 0x0841);
   frameBuffer.drawFastHLine(0, 193, FAT_CAT_PANEL_WIDTH, 0x3186);
   frameBuffer.fillCircle(15, 44, 1, TFT_YELLOW);
   frameBuffer.fillCircle(77, 105, 1, TFT_YELLOW);
-  frameBuffer.setTextDatum(MC_DATUM);
-  frameBuffer.setTextColor(TFT_CYAN, 0x0841);
-  frameBuffer.drawString(petName, 48, 18, 2);
 }
 
 uint16_t rgb(uint8_t red, uint8_t green, uint8_t blue) {
@@ -33,7 +30,7 @@ uint16_t rgb(uint8_t red, uint8_t green, uint8_t blue) {
 }
 
 // Draw a line with rounded ends using two caps and a pair of edge triangles.
-void thickLine(TFT_eSprite &frame, int16_t x0, int16_t y0, int16_t x1,
+void thickLine(TFT_eSPI &frame, int16_t x0, int16_t y0, int16_t x1,
                int16_t y1, int16_t width, uint16_t colour) {
   const float dx = x1 - x0;
   const float dy = y1 - y0;
@@ -51,19 +48,19 @@ void thickLine(TFT_eSprite &frame, int16_t x0, int16_t y0, int16_t x1,
                      colour);
 }
 
-void drawClaws(TFT_eSprite &frame, int16_t x, int16_t y, int16_t direction) {
+void drawClaws(TFT_eSPI &frame, int16_t x, int16_t y, int16_t direction) {
   const int16_t top = direction > 0 ? y : y - 7;
   for (int16_t offset = -3; offset <= 3; offset += 3) {
     frame.fillRect(x + offset, top, 2, 7, rgb(240, 235, 215));
   }
 }
 
-void drawSlothFace(TFT_eSprite &frame, int16_t cx, int16_t cy, uint8_t pose) {
+void drawSlothFace(TFT_eSPI &frame, int16_t cx, int16_t cy, bool blinking) {
   const uint16_t mask = rgb(60, 40, 30);
   const uint16_t dark = rgb(30, 20, 20);
   frame.fillEllipse(cx - 8, cy - 2, 6, 5, mask);
   frame.fillEllipse(cx + 8, cy - 2, 6, 5, mask);
-  if (pose >= 10) {
+  if (blinking) {
     frame.drawFastHLine(cx - 11, cy - 2, 7, rgb(232, 216, 172));
     frame.drawFastHLine(cx + 5, cy - 2, 7, rgb(232, 216, 172));
   } else {
@@ -79,8 +76,8 @@ void drawSlothFace(TFT_eSprite &frame, int16_t cx, int16_t cy, uint8_t pose) {
 }
 
 // Willi hanging from a branch and swinging.
-void drawWilliHanging(TFT_eSprite &frame, int16_t swing, int16_t bob,
-                      uint8_t pose) {
+void drawWilliHanging(TFT_eSPI &frame, int16_t swing, int16_t bob,
+                      uint8_t pose, bool blinking) {
   const uint16_t branch = rgb(110, 70, 35);
   const uint16_t leaf = rgb(60, 170, 70);
   const uint16_t fur = rgb(150, 135, 85);
@@ -105,11 +102,12 @@ void drawWilliHanging(TFT_eSprite &frame, int16_t swing, int16_t bob,
   frame.fillEllipse(cx, bodyY + 6, 13, 18, rgb(190, 170, 120));
   frame.fillEllipse(cx, headY, 20, 17, fur);
   frame.fillEllipse(cx, headY + 4, 16, 13, rgb(232, 216, 172));
-  drawSlothFace(frame, cx, headY + 1, pose);
+  drawSlothFace(frame, cx, headY + 1, blinking);
 }
 
 // Willi sitting upright, waving and wearing a rasta cap.
-void drawWilliSitting(TFT_eSprite &frame, int16_t bob, uint8_t pose) {
+void drawWilliSitting(TFT_eSPI &frame, int16_t bob, uint8_t pose,
+                      bool blinking) {
   static const int8_t wave[] = {0, 2, 4, 6, 4, 2, 0, -2, -4, -6, -4, -2};
   const uint16_t fur = rgb(150, 135, 85);
   const uint16_t shade = rgb(105, 90, 55);
@@ -135,11 +133,12 @@ void drawWilliSitting(TFT_eSprite &frame, int16_t bob, uint8_t pose) {
   frame.fillEllipse(48, headY - 18, 23, 14, rgb(30, 150, 60));
   frame.fillEllipse(48, headY - 20, 21, 11, rgb(250, 210, 40));
   frame.fillEllipse(48, headY - 22, 19, 8, rgb(220, 40, 40));
-  drawSlothFace(frame, 48, headY, pose);
+  drawSlothFace(frame, 48, headY, blinking);
 }
 
 // Egon on a branch; the neon variant has headphones and animated stripes.
-void drawChameleon(TFT_eSprite &frame, int16_t bob, uint8_t pose, bool neon) {
+void drawChameleon(TFT_eSPI &frame, int16_t bob, uint8_t pose, bool neon,
+                   bool blinking) {
   constexpr int16_t BRANCH_SHIFT = 26;
   const uint16_t green = rgb(30, 215, 150);
   const uint16_t darkGreen = rgb(20, 150, 105);
@@ -214,8 +213,13 @@ void drawChameleon(TFT_eSprite &frame, int16_t bob, uint8_t pose, bool neon) {
   frame.drawLine(headX + 17, headY + 6, headX + 2, headY + 8,
                  rgb(10, 70, 50));
   frame.fillCircle(headX + 5, headY - 3, 7, rgb(15, 110, 80));
-  frame.fillCircle(headX + 5, headY - 3, 5, TFT_WHITE);
-  frame.fillCircle(headX + pupilX[pose / 3], headY - 3, 3, TFT_BLACK);
+  if (blinking) {
+    frame.fillEllipse(headX + 5, headY - 3, 5, 4, green);
+    frame.drawFastHLine(headX, headY - 3, 10, darkGreen);
+  } else {
+    frame.fillCircle(headX + 5, headY - 3, 5, TFT_WHITE);
+    frame.fillCircle(headX + pupilX[pose / 3], headY - 3, 3, TFT_BLACK);
+  }
   frame.fillCircle(headX + 15, headY + 1, 1, rgb(10, 70, 50));
 
   if (neon) {
@@ -232,7 +236,7 @@ void drawChameleon(TFT_eSprite &frame, int16_t bob, uint8_t pose, bool neon) {
 constexpr int8_t kWave[] = {0, 2, 4, 6, 4, 2, 0, -2, -4, -6, -4, -2};
 
 // Fill a four-corner polygon as two triangles using the display primitives.
-void fillQuad(TFT_eSprite &frame, int16_t x0, int16_t y0, int16_t x1,
+void fillQuad(TFT_eSPI &frame, int16_t x0, int16_t y0, int16_t x1,
               int16_t y1, int16_t x2, int16_t y2, int16_t x3, int16_t y3,
               uint16_t colour) {
   frame.fillTriangle(x0, y0, x1, y1, x2, y2, colour);
@@ -240,7 +244,7 @@ void fillQuad(TFT_eSprite &frame, int16_t x0, int16_t y0, int16_t x1,
 }
 
 // Approximate an elliptical thick arc with overlapping circles.
-void drawThickArc(TFT_eSprite &frame, int16_t cx, int16_t cy, int16_t rx,
+void drawThickArc(TFT_eSPI &frame, int16_t cx, int16_t cy, int16_t rx,
                   int16_t ry, int16_t from, int16_t to, int16_t width,
                   uint16_t colour) {
   for (int16_t angle = from; angle <= to; angle += 4) {
@@ -251,7 +255,8 @@ void drawThickArc(TFT_eSprite &frame, int16_t cx, int16_t cy, int16_t rx,
 }
 
 // Hoppe the kangaroo: hoodie with peace sign, or headphones with boombox.
-void drawKangaroo(TFT_eSprite &frame, int16_t b, uint8_t pose, bool boombox) {
+void drawKangaroo(TFT_eSPI &frame, int16_t b, uint8_t pose, bool boombox,
+                  bool blinking) {
   const uint16_t fur = rgb(205, 150, 95);
   const uint16_t dark = rgb(160, 110, 65);
   const uint16_t light = rgb(238, 208, 165);
@@ -289,10 +294,19 @@ void drawKangaroo(TFT_eSprite &frame, int16_t b, uint8_t pose, bool boombox) {
     thickLine(frame, 78 + wave, 99 + b, 80 + wave, 92 + b, 2, fur);
   }
 
-  frame.fillEllipse(48, 107 + b, 7, 6, light);
-  frame.fillCircle(48, 105 + b, 2, TFT_BLACK);
-  frame.fillCircle(43, 96 + b, 2, TFT_BLACK);
-  frame.fillCircle(53, 96 + b, 2, TFT_BLACK);
+  frame.fillEllipse(48, 107 + b, 8, 7, light);
+  frame.fillCircle(48, 104 + b, 3, pink);
+  if (blinking) {
+    frame.drawFastHLine(39, 96 + b, 8, dark);
+    frame.drawFastHLine(49, 96 + b, 8, dark);
+  } else {
+    frame.fillCircle(43, 96 + b, 3, TFT_WHITE);
+    frame.fillCircle(53, 96 + b, 3, TFT_WHITE);
+    frame.fillCircle(43, 96 + b, 1, TFT_BLACK);
+    frame.fillCircle(53, 96 + b, 1, TFT_BLACK);
+  }
+  frame.drawFastVLine(48, 107 + b, 3, dark);
+  frame.drawFastHLine(45, 111 + b, 7, dark);
 
   if (boombox) {
     const uint16_t phones = rgb(40, 40, 50);
@@ -314,7 +328,8 @@ void drawKangaroo(TFT_eSprite &frame, int16_t b, uint8_t pose, bool boombox) {
 }
 
 // Siegfried the rhino standing upright: with a flying-V guitar or devil horns.
-void drawRhino(TFT_eSprite &frame, int16_t b, uint8_t pose, bool devil) {
+void drawRhino(TFT_eSPI &frame, int16_t b, uint8_t pose, bool devil,
+               bool blinking) {
   static const int8_t strum[] = {0, 4, 8, 4};
   const uint16_t grey = rgb(150, 150, 160);
   const uint16_t dark = rgb(110, 110, 120);
@@ -343,10 +358,15 @@ void drawRhino(TFT_eSprite &frame, int16_t b, uint8_t pose, bool devil) {
   frame.fillEllipse(48, 100 + b, 16, 15, light);
   frame.fillTriangle(44, 92 + b, 48, 66 + b, 52, 92 + b, horn);
   frame.fillTriangle(46, 88 + b, 48, 78 + b, 50, 88 + b, rgb(215, 205, 180));
-  frame.fillCircle(40, 98 + b, 2, TFT_BLACK);
-  frame.fillCircle(56, 98 + b, 2, TFT_BLACK);
-  frame.drawLine(36, 94 + b, 44, 96 + b, TFT_BLACK);
-  frame.drawLine(60, 94 + b, 52, 96 + b, TFT_BLACK);
+  if (blinking) {
+    frame.drawFastHLine(37, 98 + b, 7, dark);
+    frame.drawFastHLine(53, 98 + b, 7, dark);
+  } else {
+    frame.fillCircle(40, 98 + b, 2, TFT_BLACK);
+    frame.fillCircle(56, 98 + b, 2, TFT_BLACK);
+    frame.drawLine(36, 94 + b, 44, 96 + b, TFT_BLACK);
+    frame.drawLine(60, 94 + b, 52, 96 + b, TFT_BLACK);
+  }
   frame.fillCircle(43, 109 + b, 1, dark);
   frame.fillCircle(53, 109 + b, 1, dark);
   frame.drawFastHLine(42, 114 + b, 12, rgb(60, 20, 20));
@@ -382,7 +402,7 @@ void drawRhino(TFT_eSprite &frame, int16_t b, uint8_t pose, bool devil) {
 }
 
 // Moritz the jazz cat with a beret and saxophone.
-void drawMoritz(TFT_eSprite &frame, int16_t b, uint8_t pose) {
+void drawMoritz(TFT_eSPI &frame, int16_t b, uint8_t pose, bool blinking) {
   const uint16_t fur = rgb(45, 45, 55);
   const uint16_t belly = rgb(230, 230, 235);
   const uint16_t pink = rgb(235, 150, 160);
@@ -411,7 +431,7 @@ void drawMoritz(TFT_eSprite &frame, int16_t b, uint8_t pose) {
     frame.drawLine(48 + sx * 12, hy + 8, 48 + sx * 30, hy + 11, whisker);
   }
   for (int16_t sx = -10; sx <= 10; sx += 20) {
-    if (pose >= 10) {
+    if (blinking) {
       frame.drawFastHLine(48 + sx - 4, hy - 2, 9, rgb(90, 220, 90));
     } else {
       frame.fillEllipse(48 + sx, hy - 2, 4, 5, rgb(90, 220, 90));
@@ -430,7 +450,7 @@ void drawMoritz(TFT_eSprite &frame, int16_t b, uint8_t pose) {
 }
 
 // Blitz the country horse with cowboy hat and neckerchief.
-void drawBlitz(TFT_eSprite &frame, int16_t b, uint8_t pose) {
+void drawBlitz(TFT_eSPI &frame, int16_t b, uint8_t pose, bool blinking) {
   constexpr int16_t O = -5;
   const uint16_t coat = rgb(150, 95, 55);
   const uint16_t dark = rgb(95, 55, 30);
@@ -455,7 +475,11 @@ void drawBlitz(TFT_eSprite &frame, int16_t b, uint8_t pose) {
   frame.fillEllipse(84 + O, 90 + b, 9, 17, coat);
   frame.fillEllipse(91 + O, 102 + b, 5, 5, light);
   frame.fillCircle(92 + O, 102 + b, 1, TFT_BLACK);
-  frame.fillCircle(83 + O, 85 + b, 2, TFT_BLACK);
+  if (blinking) {
+    frame.drawFastHLine(80 + O, 85 + b, 6, dark);
+  } else {
+    frame.fillCircle(83 + O, 85 + b, 2, TFT_BLACK);
+  }
   for (int16_t i = 0; i < 5; ++i) {
     thickLine(frame, 62 + i * 2 + O, 80 + i * 8 + b, 56 + i * 2 + O,
               86 + i * 8 + b, 3, dark);
@@ -471,7 +495,8 @@ void drawBlitz(TFT_eSprite &frame, int16_t b, uint8_t pose) {
 }
 
 // Leopold the lion: singer with microphone, or king with crown and sceptre.
-void drawLion(TFT_eSprite &frame, int16_t b, uint8_t pose, bool king) {
+void drawLion(TFT_eSPI &frame, int16_t b, uint8_t pose, bool king,
+              bool blinking) {
   const uint16_t coat = rgb(235, 185, 80);
   const uint16_t light = rgb(250, 225, 160);
   const uint16_t mane = rgb(215, 130, 30);
@@ -498,7 +523,7 @@ void drawLion(TFT_eSprite &frame, int16_t b, uint8_t pose, bool king) {
   frame.fillTriangle(45, 104 + b, 51, 104 + b, 48, 108 + b, nose);
   frame.drawLine(48, 108 + b, 48, 112 + b, nose);
   for (int16_t sx = -7; sx <= 7; sx += 14) {
-    if (pose >= 10) {
+    if (blinking) {
       frame.drawFastHLine(48 + sx - 3, 99 + b, 7, TFT_BLACK);
     } else {
       frame.fillCircle(48 + sx, 99 + b, 2, TFT_BLACK);
@@ -543,7 +568,8 @@ void drawLion(TFT_eSprite &frame, int16_t b, uint8_t pose, bool king) {
 }
 
 // Ludwig the swan with an S-shaped neck: conductor or baroque violinist.
-void drawSwan(TFT_eSprite &frame, int16_t b, uint8_t pose, bool violin) {
+void drawSwan(TFT_eSPI &frame, int16_t b, uint8_t pose, bool violin,
+              bool blinking) {
   const uint16_t white = rgb(245, 245, 250);
   const uint16_t shade = rgb(200, 205, 225);
   const uint16_t beak = rgb(250, 150, 30);
@@ -573,7 +599,11 @@ void drawSwan(TFT_eSprite &frame, int16_t b, uint8_t pose, bool violin) {
   frame.fillTriangle(headX + 6, headY - 3, headX + 22, headY + 2, headX + 6,
                      headY + 7, beak);
   frame.drawLine(headX + 6, headY - 3, headX + 8, headY, TFT_BLACK);
-  frame.fillCircle(headX + 1, headY - 2, 2, TFT_BLACK);
+  if (blinking) {
+    frame.drawFastHLine(headX - 2, headY - 2, 7, rgb(100, 115, 135));
+  } else {
+    frame.fillCircle(headX + 1, headY - 2, 2, TFT_BLACK);
+  }
 
   if (!violin) {
     frame.fillEllipse(headX, headY - 9, 12, 3, suit);
@@ -602,7 +632,8 @@ void drawSwan(TFT_eSprite &frame, int16_t b, uint8_t pose, bool violin) {
 }
 
 // Poldi the peacock: full fan, or rock star with hat, bow tie and microphone.
-void drawPeacock(TFT_eSprite &frame, int16_t b, uint8_t pose, bool rock) {
+void drawPeacock(TFT_eSPI &frame, int16_t b, uint8_t pose, bool rock,
+                 bool blinking) {
   const uint16_t blue = rgb(20, 160, 200);
   const uint16_t darkBlue = rgb(10, 110, 160);
   const uint16_t green = rgb(40, 200, 110);
@@ -630,7 +661,11 @@ void drawPeacock(TFT_eSprite &frame, int16_t b, uint8_t pose, bool rock) {
   thickLine(frame, 50, 128 + b, 52, 112 + b, 6, blue);
   frame.fillCircle(52, 106 + b, 9, blue);
   frame.fillTriangle(58, 104 + b, 68, 109 + b, 58, 112 + b, gold);
-  frame.fillCircle(55, 103 + b, 2, TFT_BLACK);
+  if (blinking && !rock) {
+    frame.drawFastHLine(52, 103 + b, 7, darkBlue);
+  } else if (!rock) {
+    frame.fillCircle(55, 103 + b, 2, TFT_BLACK);
+  }
   for (int16_t dx = -3; dx <= 3; dx += 3) {
     thickLine(frame, 52 + dx, 98 + b, 52 + dx * 2, 88 + b, 1, darkBlue);
     frame.fillCircle(52 + dx * 2, 87 + b, 2, green);
@@ -649,7 +684,8 @@ void drawPeacock(TFT_eSprite &frame, int16_t b, uint8_t pose, bool rock) {
 }
 
 // Hansi the budgie on a perch: glitter jacket with microphone, or folk outfit.
-void drawBudgie(TFT_eSprite &frame, int16_t b, uint8_t pose, bool glitter) {
+void drawBudgie(TFT_eSPI &frame, int16_t b, uint8_t pose, bool glitter,
+                bool blinking) {
   const uint16_t blue = rgb(30, 180, 230);
   const uint16_t darkBlue = rgb(10, 110, 160);
   const uint16_t yellow = rgb(250, 230, 90);
@@ -668,7 +704,7 @@ void drawBudgie(TFT_eSprite &frame, int16_t b, uint8_t pose, bool glitter) {
   frame.fillEllipse(54, 102 + b, 13, 8, yellow);
   frame.fillTriangle(62, 92 + b, 76, 96 + b, 62, 102 + b, orange);
   frame.fillCircle(56, 88 + b, 4, TFT_WHITE);
-  if (pose >= 10) {
+  if (blinking) {
     frame.drawFastHLine(52, 88 + b, 9, yellow);
   } else {
     frame.fillCircle(57, 88 + b, 2, TFT_BLACK);
@@ -714,8 +750,8 @@ void drawBudgie(TFT_eSprite &frame, int16_t b, uint8_t pose, bool glitter) {
 }
 
 // Dispatch to the selected animal renderer and add dance-specific accents.
-void drawAnimal(TFT_eSprite &frame, uint8_t index, int16_t bob,
-                PetDance dance, uint8_t pose) {
+void drawAnimal(TFT_eSPI &frame, uint8_t index, int16_t bob,
+                PetDance dance, uint8_t pose, bool blinking) {
   static const int8_t sway[] = {0, 1, 2, 3, 2, 1, 0, -1, -2, -3, -2, -1};
   const int16_t x =
       48 + (dance == PetDance::Sway ? sway[pose] : dance == PetDance::Hop
@@ -727,47 +763,47 @@ void drawAnimal(TFT_eSprite &frame, uint8_t index, int16_t bob,
 
   switch (index) {
     case PeacockPet: {
-      drawPeacock(frame, bob, pose, dance == PetDance::Sway);
+      drawPeacock(frame, bob, pose, dance == PetDance::Sway, blinking);
       break;
     }
     case LionPet: {
-      drawLion(frame, bob, pose, dance == PetDance::Sway);
+      drawLion(frame, bob, pose, dance == PetDance::Sway, blinking);
       break;
     }
     case KangarooPet: {
-      drawKangaroo(frame, bob, pose, dance == PetDance::Sway);
+      drawKangaroo(frame, bob, pose, dance == PetDance::Sway, blinking);
       break;
     }
     case ChameleonPet: {
-      drawChameleon(frame, bob, pose, dance == PetDance::Sway);
+      drawChameleon(frame, bob, pose, dance == PetDance::Sway, blinking);
       break;
     }
     case SwanPet: {
-      drawSwan(frame, bob, pose, dance == PetDance::Sway);
+      drawSwan(frame, bob, pose, dance == PetDance::Sway, blinking);
       break;
     }
     case MoritzPet: {
-      drawMoritz(frame, bob, pose);
+      drawMoritz(frame, bob, pose, blinking);
       break;
     }
     case RhinoPet: {
-      drawRhino(frame, bob, pose, dance == PetDance::Sway);
+      drawRhino(frame, bob, pose, dance == PetDance::Sway, blinking);
       break;
     }
     case WilliPet: {
       if (dance == PetDance::Sway) {
-        drawWilliHanging(frame, sway[pose] * 2, bob, pose);
+        drawWilliHanging(frame, sway[pose] * 2, bob, pose, blinking);
       } else {
-        drawWilliSitting(frame, bob, pose);
+        drawWilliSitting(frame, bob, pose, blinking);
       }
       break;
     }
     case BlitzPet: {
-      drawBlitz(frame, bob, pose);
+      drawBlitz(frame, bob, pose, blinking);
       break;
     }
     case HansiPet: {
-      drawBudgie(frame, bob, pose, dance == PetDance::Sway);
+      drawBudgie(frame, bob, pose, dance == PetDance::Sway, blinking);
       break;
     }
   }
@@ -784,25 +820,16 @@ void drawAnimal(TFT_eSprite &frame, uint8_t index, int16_t bob,
   }
 }
 
-void drawLabels(TFT_eSprite &frame, const Pet &pet) {
-  frame.fillRect(0, 198, FAT_CAT_PANEL_WIDTH, 42, 0x0841);
-  frame.setTextDatum(MC_DATUM);
-  frame.setTextColor(TFT_CYAN, 0x0841);
-  frame.setTextColor(TFT_WHITE, 0x0841);
-  frame.drawString(pet.animalType, 29, 218, 1);
-  frame.drawString(pet.animalName, 70, 218, 1);
-}
-
 }  // namespace
 
 // Compose the selected pet frame from its background, pose, outfit, and label.
-void drawPet(TFT_eSprite &frameBuffer, uint32_t now, const Pet &pet,
+void drawPet(TFT_eSPI &frameBuffer, uint32_t now, const Pet &pet,
              PetDance dance, PetOutfit outfit) {
   if (pet.drawingIndex < 0) {
     return;
   }
 
-  drawFrame(frameBuffer, pet.animalName);
+  drawFrame(frameBuffer);
   const uint8_t pose = (now / FAT_CAT_FRAME_INTERVAL_MS) % 12;
   static const int8_t bounce[] = {0, -2, -5, -8, -10, -8,
                                   -5, -2, 0, 2, 1, 0};
@@ -813,7 +840,8 @@ void drawPet(TFT_eSprite &frameBuffer, uint32_t now, const Pet &pet,
                           ? sway[pose]
                           : dance == PetDance::Hop ? hops[pose] : bounce[pose];
   const uint8_t index = static_cast<uint8_t>(pet.drawingIndex);
-  drawAnimal(frameBuffer, index, bob, dance, pose);
+  const uint8_t petIndex = index + 1;
+  drawAnimal(frameBuffer, index, bob, dance, pose,
+             isPetBlinking(now, petIndex));
   drawPetClothing(frameBuffer, index, outfit, bob);
-  drawLabels(frameBuffer, pet);
 }

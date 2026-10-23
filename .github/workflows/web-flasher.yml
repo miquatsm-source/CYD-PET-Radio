@@ -30,8 +30,8 @@ jobs:
 
       - name: Build firmware
         run: |
-          pio run -e esp32dev-fast
-          pio run -e esp32dev-ili9341
+          pio run -e esp32dev-fast-low-memory
+          pio run -e esp32dev-ili9341-low-memory
           pio run -e fnk0114l
 
       - name: Assemble website and firmware
@@ -46,8 +46,8 @@ jobs:
           cp src/CYD-PET-Radio.png site/CYD-PET-Radio.png
           for target in cyd cyd-ili9341 freenove; do
             case "$target" in
-              cyd) env_name=esp32dev-fast ;;
-              cyd-ili9341) env_name=esp32dev-ili9341 ;;
+              cyd) env_name=esp32dev-fast-low-memory ;;
+              cyd-ili9341) env_name=esp32dev-ili9341-low-memory ;;
               freenove) env_name=fnk0114l ;;
             esac
             cp ".pio/build/$env_name/bootloader.bin" "site/firmware/$target/bootloader.bin"

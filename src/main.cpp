@@ -7,6 +7,7 @@
 #include <XPT2046_Touchscreen.h>
 #include <WiFi.h>
 #include <Audio.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <math.h>
 
@@ -31,10 +32,27 @@ constexpr int16_t TOUCH_CALIBRATION_Y[TOUCH_CALIBRATION_TARGET_COUNT] = {
     36, 36, 203, 203, DISPLAY_HEIGHT / 2};
 constexpr uint8_t TOUCH_CALIBRATION_VERSION = 1;
 constexpr int16_t CAT_PANEL_WIDTH = FAT_CAT_PANEL_WIDTH;
+constexpr int16_t PET_HEADER_HEIGHT = 32;
+constexpr int16_t PET_ANIMATION_HEIGHT = 195 - PET_HEADER_HEIGHT;
 constexpr int16_t HOME_UI_LEFT = 103;
 constexpr int16_t HOME_UI_WIDTH = 210;
 constexpr int16_t MENU_UI_LEFT = 12;
 constexpr int16_t MENU_UI_WIDTH = DISPLAY_WIDTH - 2 * MENU_UI_LEFT;
+#if defined(BOARD_FREENOVE_FNK0114L)
+constexpr char BUILD_PROFILE_NAME[] = "fnk0114l";
+#elif defined(ILI9341_DRIVER)
+#if defined(CYD_LOW_MEMORY_DIRECT_RENDER)
+constexpr char BUILD_PROFILE_NAME[] = "esp32dev-ili9341-low-memory";
+#else
+constexpr char BUILD_PROFILE_NAME[] = "esp32dev-ili9341";
+#endif
+#elif defined(CYD_LOW_MEMORY_DIRECT_RENDER)
+constexpr char BUILD_PROFILE_NAME[] = "esp32dev-fast-low-memory";
+#elif defined(SPI_FREQUENCY) && SPI_FREQUENCY >= 80000000
+constexpr char BUILD_PROFILE_NAME[] = "esp32dev-fast";
+#else
+constexpr char BUILD_PROFILE_NAME[] = "esp32dev";
+#endif
 #if defined(BOARD_FREENOVE_FNK0114L)
 constexpr int16_t SETTINGS_ITEM_HEIGHT = 32;
 constexpr int16_t SETTINGS_ITEM_GAP = 6;
@@ -115,7 +133,6 @@ constexpr uint16_t ERROR_COLOUR = 0xF986;
 
 struct Station {
   char name[STATION_NAME_SIZE]{};
-  char url[STATION_URL_SIZE]{};
 };
 
 struct TouchCalibration {
@@ -164,6 +181,9 @@ enum class TimerState : uint8_t {
 TFT_eSPI display;
 // Composite the UI and cat before pushing one complete frame to the TFT.
 TFT_eSprite screenFrameBuffer(&display);
+TFT_eSprite petPanelFrameBuffer(&display);
+bool displayFramebufferReady = false;
+bool petPanelFramebufferReady = false;
 TFT_eSPI *renderTarget = &display;
 int16_t UI_LEFT = HOME_UI_LEFT;
 int16_t UI_WIDTH = HOME_UI_WIDTH;
@@ -239,6 +259,7 @@ volatile uint8_t wifiDisconnectReason = 0;
 volatile bool wifiDisconnectReasonPending = false;
 uint8_t selectedPetIndex = 0;
 uint8_t displayedPetIndex = 0;
+int8_t petTitleIndex = -1;
 uint32_t wifiConnectStartedAt = 0;
 uint32_t streamRestartAt = 0;
 uint32_t lastTouchAt = 0;
@@ -518,7 +539,8 @@ void shiftPetPanel(TFT_eSprite &frameBuffer, int16_t offset) {
   }
   const int16_t distance = abs(offset);
   if (distance >= FAT_CAT_PANEL_WIDTH) {
-    frameBuffer.fillRect(0, 0, FAT_CAT_PANEL_WIDTH, 195, 0x0841);
+    frameBuffer.fillRect(0, PET_HEADER_HEIGHT, FAT_CAT_PANEL_WIDTH,
+                         PET_ANIMATION_HEIGHT, 0x0841);
     return;
   }
 
@@ -527,7 +549,7 @@ void shiftPetPanel(TFT_eSprite &frameBuffer, int16_t offset) {
     Serial.println("ERROR: missing display frame buffer during pet transition.");
     return;
   }
-  for (int16_t y = 0; y < 195; ++y) {
+  for (int16_t y = PET_HEADER_HEIGHT; y < 195; ++y) {
     uint8_t *row = pixels + y * DISPLAY_WIDTH;
     if (offset > 0) {
       memmove(row + distance, row, FAT_CAT_PANEL_WIDTH - distance);
@@ -536,10 +558,11 @@ void shiftPetPanel(TFT_eSprite &frameBuffer, int16_t offset) {
     }
   }
   if (offset > 0) {
-    frameBuffer.fillRect(0, 0, distance, 195, 0x0841);
+    frameBuffer.fillRect(0, PET_HEADER_HEIGHT, distance,
+                         PET_ANIMATION_HEIGHT, 0x0841);
   } else {
-    frameBuffer.fillRect(FAT_CAT_PANEL_WIDTH - distance, 0, distance, 195,
-                         0x0841);
+    frameBuffer.fillRect(FAT_CAT_PANEL_WIDTH - distance, PET_HEADER_HEIGHT,
+                         distance, PET_ANIMATION_HEIGHT, 0x0841);
   }
 }
 
@@ -568,7 +591,7 @@ void updateBubbleText(uint32_t now) {
   }
 }
 
-void drawSpeechBubble(TFT_eSprite &frameBuffer, const char *text) {
+void drawSpeechBubble(TFT_eSPI &frameBuffer, const char *text) {
   constexpr int16_t BUBBLE_X = 4;
   constexpr int16_t BUBBLE_Y = 48;
   constexpr int16_t BUBBLE_WIDTH = 88;
@@ -587,28 +610,28 @@ void drawSpeechBubble(TFT_eSprite &frameBuffer, const char *text) {
 
 void drawTimerAdjustButton(int16_t x, int16_t y, bool increase,
                            const char *label) {
-  screenFrameBuffer.fillRoundRect(x, y, 43, 25, 5,
-                                  BUTTON_COLORS[buttonColorIndex]);
-  screenFrameBuffer.drawRoundRect(x, y, 43, 25, 5, 0x4208);
+  renderTarget->fillRoundRect(x, y, 43, 25, 5,
+                              BUTTON_COLORS[buttonColorIndex]);
+  renderTarget->drawRoundRect(x, y, 43, 25, 5, 0x4208);
   if (increase) {
-    screenFrameBuffer.fillTriangle(x + 7, y + 13, x + 15, y + 13, x + 11,
-                                   y + 7, TFT_WHITE);
+    renderTarget->fillTriangle(x + 7, y + 13, x + 15, y + 13, x + 11,
+                               y + 7, TFT_WHITE);
   } else {
-    screenFrameBuffer.fillTriangle(x + 7, y + 11, x + 15, y + 11, x + 11,
-                                   y + 17, TFT_WHITE);
+    renderTarget->fillTriangle(x + 7, y + 11, x + 15, y + 11, x + 11,
+                               y + 17, TFT_WHITE);
   }
-  screenFrameBuffer.setTextDatum(MC_DATUM);
-  screenFrameBuffer.setTextColor(TFT_WHITE, BUTTON_COLORS[buttonColorIndex]);
-  screenFrameBuffer.drawString(label, x + 30, y + 13, 1);
+  renderTarget->setTextDatum(MC_DATUM);
+  renderTarget->setTextColor(TFT_WHITE, BUTTON_COLORS[buttonColorIndex]);
+  renderTarget->drawString(label, x + 30, y + 13, 1);
 }
 
 void drawTimerActionButton(const char *label) {
-  screenFrameBuffer.fillRoundRect(8, 158, 80, 27, 6,
-                                  BUTTON_COLORS[buttonColorIndex]);
-  screenFrameBuffer.drawRoundRect(8, 158, 80, 27, 6, 0x4208);
-  screenFrameBuffer.setTextDatum(MC_DATUM);
-  screenFrameBuffer.setTextColor(TFT_WHITE, BUTTON_COLORS[buttonColorIndex]);
-  screenFrameBuffer.drawString(label, 48, 172, 2);
+  renderTarget->fillRoundRect(8, 158, 80, 27, 6,
+                              BUTTON_COLORS[buttonColorIndex]);
+  renderTarget->drawRoundRect(8, 158, 80, 27, 6, 0x4208);
+  renderTarget->setTextDatum(MC_DATUM);
+  renderTarget->setTextColor(TFT_WHITE, BUTTON_COLORS[buttonColorIndex]);
+  renderTarget->drawString(label, 48, 172, 2);
 }
 
 // Render timer controls, or replace the panel with the pulsing expiry screen.
@@ -617,31 +640,30 @@ void drawTimerPanel(uint32_t now) {
     const uint16_t phase = now % 1200;
     const uint16_t pulse = phase < 600 ? phase : 1200 - phase;
     const uint8_t green = 48 + pulse * 176 / 600;
-    const uint16_t orange = screenFrameBuffer.color565(255, green, 0);
-    screenFrameBuffer.fillRect(0, 0, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT,
-                               orange);
-    screenFrameBuffer.setTextDatum(MC_DATUM);
-    screenFrameBuffer.setTextColor(TFT_WHITE, orange);
-    screenFrameBuffer.setTextSize(3);
-    screenFrameBuffer.drawString("Time", DISPLAY_WIDTH / 4, 72, 2);
-    screenFrameBuffer.drawString("is", DISPLAY_WIDTH / 4, 120, 2);
-    screenFrameBuffer.drawString("up", DISPLAY_WIDTH / 4, 168, 2);
-    screenFrameBuffer.setTextSize(1);
+    const uint16_t orange = renderTarget->color565(255, green, 0);
+    renderTarget->fillRect(0, 0, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT, orange);
+    renderTarget->setTextDatum(MC_DATUM);
+    renderTarget->setTextColor(TFT_WHITE, orange);
+    renderTarget->setTextSize(3);
+    renderTarget->drawString("Time", DISPLAY_WIDTH / 4, 72, 2);
+    renderTarget->drawString("is", DISPLAY_WIDTH / 4, 120, 2);
+    renderTarget->drawString("up", DISPLAY_WIDTH / 4, 168, 2);
+    renderTarget->setTextSize(1);
     return;
   }
 
-  screenFrameBuffer.fillRect(0, 0, CAT_PANEL_WIDTH, 195, 0x0841);
-  screenFrameBuffer.setTextDatum(MC_DATUM);
-  screenFrameBuffer.setTextColor(TFT_CYAN, 0x0841);
+  renderTarget->fillRect(0, 0, CAT_PANEL_WIDTH, 195, 0x0841);
+  renderTarget->setTextDatum(MC_DATUM);
+  renderTarget->setTextColor(TFT_CYAN, 0x0841);
   switch (timerState) {
     case TimerState::Ready:
-      screenFrameBuffer.drawString("SET TIMER", 48, 25, 1);
+      renderTarget->drawString("SET TIMER", 48, 25, 1);
       break;
     case TimerState::Running:
-      screenFrameBuffer.drawString("RUNNING", 48, 25, 1);
+      renderTarget->drawString("RUNNING", 48, 25, 1);
       break;
     case TimerState::Paused:
-      screenFrameBuffer.drawString("PAUSED", 48, 25, 1);
+      renderTarget->drawString("PAUSED", 48, 25, 1);
       break;
     case TimerState::Expired:
       return;
@@ -655,22 +677,22 @@ void drawTimerPanel(uint32_t now) {
   }
 
   const uint32_t remainingSeconds = (timerRemainingMs(now) + 999) / 1000;
-  screenFrameBuffer.setTextColor(TFT_WHITE, 0x0841);
+  renderTarget->setTextColor(TFT_WHITE, 0x0841);
   if (remainingSeconds < 60) {
     char seconds[3];
     snprintf(seconds, sizeof(seconds), "%02lu",
              static_cast<unsigned long>(remainingSeconds));
-    screenFrameBuffer.setTextSize(3);
-    screenFrameBuffer.drawString(seconds, 48, 91, 2);
-    screenFrameBuffer.setTextSize(1);
+    renderTarget->setTextSize(3);
+    renderTarget->drawString(seconds, 48, 91, 2);
+    renderTarget->setTextSize(1);
   } else {
     char countdown[6];
     snprintf(countdown, sizeof(countdown), "%02lu:%02lu",
              static_cast<unsigned long>(remainingSeconds / 60),
              static_cast<unsigned long>(remainingSeconds % 60));
-    screenFrameBuffer.setTextSize(2);
-    screenFrameBuffer.drawString(countdown, 48, 91, 2);
-    screenFrameBuffer.setTextSize(1);
+    renderTarget->setTextSize(2);
+    renderTarget->drawString(countdown, 48, 91, 2);
+    renderTarget->setTextSize(1);
   }
 
   if (timerState == TimerState::Ready || timerState == TimerState::Paused) {
@@ -686,40 +708,70 @@ void drawTimerPanel(uint32_t now) {
 // appropriate screen region to the display.
 void drawCatFrame(uint32_t now, bool pushFullFrame = false) {
   const bool timerExpired = timerState == TimerState::Expired;
+  const bool usePetPanelFramebuffer = petPanelFramebufferReady &&
+                                      !displayFramebufferReady;
+  if (usePetPanelFramebuffer) {
+    renderTarget = &petPanelFrameBuffer;
+  } else if (displayFramebufferReady) {
+    renderTarget = &screenFrameBuffer;
+  }
   if (timerModeActive()) {
+    petTitleIndex = -1;
     drawTimerPanel(now);
   } else {
     const Pet &pet = petList[displayedPetIndex];
+    const bool titleAreaCleared =
+        pushFullFrame && (displayFramebufferReady || !petPanelFramebufferReady);
+    if (titleAreaCleared || petTitleIndex != displayedPetIndex) {
+      renderTarget->fillRect(0, 0, CAT_PANEL_WIDTH, PET_HEADER_HEIGHT, 0x0841);
+      renderTarget->setTextDatum(MC_DATUM);
+      renderTarget->setTextColor(TFT_CYAN, 0x0841);
+      renderTarget->drawString(pet.animalName, CAT_PANEL_WIDTH / 2, 18, 2);
+      renderTarget->drawFastHLine(0, PET_HEADER_HEIGHT - 1,
+                                  CAT_PANEL_WIDTH, 0x4208);
+      petTitleIndex = displayedPetIndex;
+    }
+    renderTarget->fillRect(0, PET_HEADER_HEIGHT, CAT_PANEL_WIDTH,
+                           PET_ANIMATION_HEIGHT, 0x0841);
+    renderTarget->setViewport(0, PET_HEADER_HEIGHT, CAT_PANEL_WIDTH,
+                              PET_ANIMATION_HEIGHT, false);
     if (pet.drawingIndex < 0) {
-      drawFatCat(screenFrameBuffer, now, pet.animalName, petDance, petOutfit);
+      drawFatCat(*renderTarget, now, petDance, petOutfit);
     } else {
-      drawPet(screenFrameBuffer, now, pet, petDance, petOutfit);
+      drawPet(*renderTarget, now, pet, petDance, petOutfit);
     }
     if (bubbleVisible) {
-      drawSpeechBubble(screenFrameBuffer,
+      drawSpeechBubble(*renderTarget,
                        bubbleTexts[bubblePetIndex][bubbleTextIndex]);
     }
+    renderTarget->resetViewport();
   }
   if (!timerExpired) {
-    shiftPetPanel(screenFrameBuffer, petTransitionOffset(now));
-    drawAudioSpectrum(screenFrameBuffer, now, streamActive,
+    if (displayFramebufferReady) {
+      shiftPetPanel(screenFrameBuffer, petTransitionOffset(now));
+    }
+    drawAudioSpectrum(*renderTarget, now, streamActive,
                       audioSpectrumEnabled);
     const bool wifiConnected = WiFi.status() == WL_CONNECTED;
     const String wifiLabel =
         wifiConnected ? "Wi-Fi " + String(WiFi.RSSI()) + " dBm" : "Wi-Fi OFF";
-    screenFrameBuffer.setTextDatum(TL_DATUM);
-    screenFrameBuffer.setTextColor(wifiConnected ? SUCCESS : TEXT_MUTED,
-                                   0x0841);
-    screenFrameBuffer.drawString(wifiLabel, 2, 2, 1);
+    renderTarget->setTextDatum(TL_DATUM);
+    renderTarget->setTextColor(wifiConnected ? SUCCESS : TEXT_MUTED, 0x0841);
+    renderTarget->drawString(wifiLabel, 2, 2, 1);
   }
-  if (pushFullFrame) {
-    screenFrameBuffer.pushSprite(0, 0);
-  } else {
-    screenFrameBuffer.pushSprite(0, 0, 0, 0,
-                                 timerExpired ? DISPLAY_WIDTH / 2
-                                              : CAT_PANEL_WIDTH,
-                                 DISPLAY_HEIGHT);
+  if (displayFramebufferReady) {
+    if (pushFullFrame) {
+      screenFrameBuffer.pushSprite(0, 0);
+    } else {
+      screenFrameBuffer.pushSprite(0, 0, 0, 0,
+                                   timerExpired ? DISPLAY_WIDTH / 2
+                                                : CAT_PANEL_WIDTH,
+                                   DISPLAY_HEIGHT);
+    }
+  } else if (usePetPanelFramebuffer) {
+    petPanelFrameBuffer.pushSprite(0, 0);
   }
+  renderTarget = &display;
 }
 
 bool pointInRect(int16_t x, int16_t y, int16_t left, int16_t top,
@@ -958,7 +1010,12 @@ void drawPanelHeader(const String &title) {
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TFT_CYAN, backgroundColor);
   display.drawString(title, UI_LEFT, 9, 2);
-  display.drawFastHLine(UI_LEFT, 31, UI_WIDTH, 0x4208);
+  const int16_t lineLeft =
+      currentScreen == Screen::Home ? CAT_PANEL_WIDTH : UI_LEFT;
+  const int16_t lineWidth =
+      currentScreen == Screen::Home ? DISPLAY_WIDTH - CAT_PANEL_WIDTH
+                                    : UI_WIDTH;
+  display.drawFastHLine(lineLeft, 31, lineWidth, 0x4208);
 }
 
 void drawMenuBackButton() {
@@ -1515,12 +1572,21 @@ void drawKeyboard() {
 // Render the current screen into the sprite and then refresh the display.
 void renderScreen() {
   updateScreenLayout();
-  renderTarget = &screenFrameBuffer;
-  screenFrameBuffer.fillSprite(backgroundColor);
+  renderTarget = displayFramebufferReady
+                     ? static_cast<TFT_eSPI *>(&screenFrameBuffer)
+                     : &display;
+  if (displayFramebufferReady) {
+    screenFrameBuffer.fillSprite(backgroundColor);
+  } else if (currentScreen == Screen::Home && petPanelFramebufferReady) {
+    display.fillRect(CAT_PANEL_WIDTH, 0, DISPLAY_WIDTH - CAT_PANEL_WIDTH,
+                     DISPLAY_HEIGHT, backgroundColor);
+  } else {
+    display.fillScreen(backgroundColor);
+  }
   if (currentScreen == Screen::Home) {
-    screenFrameBuffer.setViewport(CAT_PANEL_WIDTH, 0,
-                                  DISPLAY_WIDTH - CAT_PANEL_WIDTH,
-                                  DISPLAY_HEIGHT, false);
+    renderTarget->setViewport(CAT_PANEL_WIDTH, 0,
+                              DISPLAY_WIDTH - CAT_PANEL_WIDTH,
+                              DISPLAY_HEIGHT, false);
   }
   switch (currentScreen) {
     case Screen::Home:
@@ -1554,9 +1620,9 @@ void renderScreen() {
       break;
   }
   if (currentScreen == Screen::Home) {
-    screenFrameBuffer.resetViewport();
+    renderTarget->resetViewport();
     drawCatFrame(millis(), true);
-  } else {
+  } else if (displayFramebufferReady) {
     screenFrameBuffer.pushSprite(0, 0);
   }
   uiDirty = false;
@@ -1848,16 +1914,47 @@ bool saveVolume() {
   return preferences.putUChar("volume", volume) > 0;
 }
 
+bool loadStationUrl(uint8_t index, char *url, size_t urlSize) {
+  char urlKey[5];
+  snprintf(urlKey, sizeof(urlKey), "u%u", index);
+  return preferences.getString(urlKey, url, urlSize) > 0;
+}
+
+bool saveStationUrl(uint8_t index, const char *url) {
+  char urlKey[5];
+  snprintf(urlKey, sizeof(urlKey), "u%u", index);
+  return preferences.putString(urlKey, url) > 0;
+}
+
+bool shiftStationUrls(uint8_t index, uint8_t count) {
+  char url[STATION_URL_SIZE];
+  for (uint8_t current = index; current + 1 < count; ++current) {
+    if (!loadStationUrl(current + 1, url, sizeof(url)) ||
+        !saveStationUrl(current, url)) {
+      Serial.printf("ERROR: could not shift saved URL for station %u.\n",
+                    current + 1);
+      return false;
+    }
+  }
+  char lastUrlKey[5];
+  snprintf(lastUrlKey, sizeof(lastUrlKey), "u%u", count - 1);
+  if (!preferences.remove(lastUrlKey)) {
+    Serial.println("ERROR: could not remove final saved station URL.");
+    return false;
+  }
+  return true;
+}
+
 bool saveStationList() {
-  bool saved = preferences.putUChar("count", stationCount) > 0;
+  bool saved = true;
   for (uint8_t i = 0; i < stationCount; ++i) {
     char nameKey[5];
-    char urlKey[5];
     snprintf(nameKey, sizeof(nameKey), "n%u", i);
-    snprintf(urlKey, sizeof(urlKey), "u%u", i);
     saved &= preferences.putString(nameKey, stations[i].name) > 0;
-    saved &= preferences.putString(urlKey, stations[i].url) > 0;
+    char url[STATION_URL_SIZE];
+    saved &= loadStationUrl(i, url, sizeof(url));
   }
+  saved &= preferences.putUChar("count", stationCount) > 0;
   if (!saved) {
     setStatus("Could not save station list");
     Serial.println("ERROR: could not persist the station list.");
@@ -1871,8 +1968,9 @@ void loadDefaultStations() {
   for (uint8_t i = 0; i < stationCount; ++i) {
     strlcpy(stations[i].name, DEFAULT_STATION_NAMES[i],
             sizeof(stations[i].name));
-    strlcpy(stations[i].url, DEFAULT_STATION_URLS[i],
-            sizeof(stations[i].url));
+    if (!saveStationUrl(i, DEFAULT_STATION_URLS[i])) {
+      Serial.printf("ERROR: could not save default station URL %u.\n", i + 1);
+    }
   }
 }
 
@@ -1881,14 +1979,16 @@ bool isLegacyDefaultPlaylist() {
   if (stationCount != 3) {
     return false;
   }
+  char url[STATION_URL_SIZE];
   return strcmp(stations[0].name, "Radio Paradise") == 0 &&
-         strcmp(stations[0].url, "http://stream.radioparadise.com/mp3-128") ==
-             0 &&
+         loadStationUrl(0, url, sizeof(url)) &&
+         strcmp(url, "http://stream.radioparadise.com/mp3-128") == 0 &&
          strcmp(stations[1].name, "SomaFM Groove Salad") == 0 &&
-         strcmp(stations[1].url,
-                "https://ice1.somafm.com/groovesalad-128-mp3") == 0 &&
+         loadStationUrl(1, url, sizeof(url)) &&
+         strcmp(url, "https://ice1.somafm.com/groovesalad-128-mp3") == 0 &&
          strcmp(stations[2].name, "Deutschlandfunk") == 0 &&
-         strcmp(stations[2].url,
+         loadStationUrl(2, url, sizeof(url)) &&
+         strcmp(url,
                 "https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3") ==
              0;
 }
@@ -1942,6 +2042,12 @@ bool migrateDefaultStationUrls() {
   }
   bool changed = false;
   for (uint8_t stationIndex = 0; stationIndex < stationCount;) {
+    char url[STATION_URL_SIZE];
+    if (!loadStationUrl(stationIndex, url, sizeof(url))) {
+      Serial.printf("ERROR: saved URL for station %u is unavailable.\n",
+                    stationIndex + 1);
+      return changed;
+    }
     constexpr struct {
       const char *name;
       const char *url;
@@ -1968,26 +2074,29 @@ bool migrateDefaultStationUrls() {
     for (const auto &entry : englishFactoryStations) {
       isEnglishFactoryStation |=
           strcmp(stations[stationIndex].name, entry.name) == 0 &&
-          strcmp(stations[stationIndex].url, entry.url) == 0;
+          strcmp(url, entry.url) == 0;
     }
     const bool isDefaultBbcOne =
         strcmp(stations[stationIndex].name, "BBC Radio 1 (UK)") == 0 &&
-        (strcmp(stations[stationIndex].url,
+        (strcmp(url,
                 "http://stream.live.vc.bbc.co.uk/bbc_radio_one") == 0 ||
-         strcmp(stations[stationIndex].url,
+         strcmp(url,
                 "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_one&bitrate=96000") ==
              0);
     const bool isDefaultBbcTwo =
         strcmp(stations[stationIndex].name, "BBC Radio 2 (UK)") == 0 &&
-        (strcmp(stations[stationIndex].url,
+        (strcmp(url,
                 "http://stream.live.vc.bbc.co.uk/bbc_radio_two") == 0 ||
-         strcmp(stations[stationIndex].url,
+         strcmp(url,
                 "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_two&bitrate=96000") ==
              0);
     if (isDefaultBbcOne || isDefaultBbcTwo || isEnglishFactoryStation) {
       char removedStation[STATION_NAME_SIZE];
       strlcpy(removedStation, stations[stationIndex].name,
               sizeof(removedStation));
+      if (!shiftStationUrls(stationIndex, stationCount)) {
+        return changed;
+      }
       for (uint8_t next = stationIndex; next + 1 < stationCount; ++next) {
         stations[next] = stations[next + 1];
       }
@@ -2002,14 +2111,18 @@ bool migrateDefaultStationUrls() {
     }
     for (const UrlMigration &migration : migrations) {
       if (strcmp(stations[stationIndex].name, migration.name) != 0 ||
-          strcmp(stations[stationIndex].url, migration.oldUrl) != 0) {
+          strcmp(url, migration.oldUrl) != 0) {
         continue;
       }
       for (uint8_t defaultIndex = 0; defaultIndex < DEFAULT_STATION_COUNT;
            ++defaultIndex) {
         if (strcmp(DEFAULT_STATION_NAMES[defaultIndex], migration.name) == 0) {
-          strlcpy(stations[stationIndex].url, DEFAULT_STATION_URLS[defaultIndex],
-                  sizeof(stations[stationIndex].url));
+          if (!saveStationUrl(stationIndex,
+                              DEFAULT_STATION_URLS[defaultIndex])) {
+            Serial.printf("ERROR: could not update saved URL for %s.\n",
+                          migration.name);
+            return changed;
+          }
           changed = true;
           Serial.printf("Updated saved stream URL for %s.\n", migration.name);
           break;
@@ -2022,13 +2135,16 @@ bool migrateDefaultStationUrls() {
     for (uint8_t defaultIndex = 0; defaultIndex < DEFAULT_STATION_COUNT;
          ++defaultIndex) {
       bool alreadyPresent = false;
+      char url[STATION_URL_SIZE];
       for (uint8_t stationIndex = 0; stationIndex < stationCount;
            ++stationIndex) {
         alreadyPresent |=
             strcmp(stations[stationIndex].name,
-                   DEFAULT_STATION_NAMES[defaultIndex]) == 0 ||
-            strcmp(stations[stationIndex].url,
-                   DEFAULT_STATION_URLS[defaultIndex]) == 0;
+                   DEFAULT_STATION_NAMES[defaultIndex]) == 0;
+        if (loadStationUrl(stationIndex, url, sizeof(url))) {
+          alreadyPresent |=
+              strcmp(url, DEFAULT_STATION_URLS[defaultIndex]) == 0;
+        }
       }
       if (alreadyPresent) {
         continue;
@@ -2039,8 +2155,11 @@ bool migrateDefaultStationUrls() {
       }
       strlcpy(stations[stationCount].name, DEFAULT_STATION_NAMES[defaultIndex],
               sizeof(stations[stationCount].name));
-      strlcpy(stations[stationCount].url, DEFAULT_STATION_URLS[defaultIndex],
-              sizeof(stations[stationCount].url));
+      if (!saveStationUrl(stationCount, DEFAULT_STATION_URLS[defaultIndex])) {
+        Serial.printf("ERROR: could not save default station URL %u.\n",
+                      defaultIndex + 1);
+        break;
+      }
       ++stationCount;
       changed = true;
     }
@@ -2066,9 +2185,9 @@ void loadStations() {
       snprintf(urlKey, sizeof(urlKey), "u%u", i);
       preferences.getString(nameKey, stations[i].name,
                             sizeof(stations[i].name));
-      preferences.getString(urlKey, stations[i].url,
-                            sizeof(stations[i].url));
-      if (stations[i].name[0] == '\0' || stations[i].url[0] == '\0') {
+      char url[STATION_URL_SIZE];
+      preferences.getString(urlKey, url, sizeof(url));
+      if (stations[i].name[0] == '\0' || url[0] == '\0') {
         Serial.printf("ERROR: saved station %u is incomplete.\n", i + 1);
         stationCount = i;
         saveStationList();
@@ -2187,10 +2306,29 @@ void startStream() {
   streamTitle = "";
   streamStation = "";
   streamRestartPending = false;
+  streamActive = false;
   radioAudio.stopSong();
   radioAudio.setVolume(volume);
   startAudioFadeIn();
-  if (!radioAudio.connecttohost(stations[selectedStation].url)) {
+  char stationUrl[STATION_URL_SIZE];
+  if (!loadStationUrl(selectedStation, stationUrl, sizeof(stationUrl))) {
+    streamActive = false;
+    Serial.printf("ERROR: could not load URL for station %u.\n",
+                  selectedStation + 1);
+    setStatus("Could not load station URL");
+    return;
+  }
+  const uint32_t internalFreeHeap =
+      heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  const uint32_t internalLargestBlock =
+      heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  Serial.printf(
+      "Memory before stream %u: internal free=%u bytes, largest block=%u "
+      "bytes, PSRAM=%u bytes.\n",
+      selectedStation + 1, static_cast<unsigned>(internalFreeHeap),
+      static_cast<unsigned>(internalLargestBlock),
+      static_cast<unsigned>(ESP.getPsramSize()));
+  if (!radioAudio.connecttohost(stationUrl)) {
     streamActive = false;
     setStatus("Could not start stream");
     Serial.printf("ERROR: could not connect to station %u.\n",
@@ -2355,7 +2493,13 @@ void startStationEditor(bool isNew, uint8_t index) {
   stationEditorIsNew = isNew;
   editorIndex = index;
   editName = isNew ? "" : stations[index].name;
-  editUrl = isNew ? "" : stations[index].url;
+  char url[STATION_URL_SIZE] = "";
+  if (!isNew && !loadStationUrl(index, url, sizeof(url))) {
+    Serial.printf("ERROR: could not load URL for station %u.\n", index + 1);
+    setStatus("Could not load station URL");
+    return;
+  }
+  editUrl = isNew ? "" : url;
   if (isNew) {
     showStationPageFor(index);
   }
@@ -2529,8 +2673,12 @@ void saveStationEditor() {
     setStatus("Station list is full");
     return;
   }
+  if (!saveStationUrl(index, editUrl.c_str())) {
+    Serial.printf("ERROR: could not save URL for station %u.\n", index + 1);
+    setStatus("Could not save station URL");
+    return;
+  }
   strlcpy(stations[index].name, editName.c_str(), sizeof(stations[index].name));
-  strlcpy(stations[index].url, editUrl.c_str(), sizeof(stations[index].url));
   if (stationEditorIsNew) {
     ++stationCount;
     selectedStation = index;
@@ -2552,6 +2700,10 @@ void deleteStation(uint8_t index) {
     return;
   }
   const bool deletedCurrentStation = streamActive && index == selectedStation;
+  if (!shiftStationUrls(index, stationCount)) {
+    setStatus("Could not update station storage");
+    return;
+  }
   for (uint8_t i = index; i + 1 < stationCount; ++i) {
     stations[i] = stations[i + 1];
   }
@@ -2885,6 +3037,11 @@ void audio_showstreamtitle(const char *info) {
 
 // Schedule a delayed reconnect when the decoder reports end of stream.
 void audio_eof_stream(const char *info) {
+  if (!streamActive) {
+    Serial.printf("audio: ignoring stream end before successful connection (%s)\n",
+                  info);
+    return;
+  }
   streamActive = false;
   streamRestartPending = true;
   streamRestartAt = millis();
@@ -2896,13 +3053,17 @@ void audio_eof_stream(const char *info) {
 void setup() {
   Serial.begin(115200);
 #if defined(BOARD_FREENOVE_FNK0114L)
-  Serial.println("Booting CYD PET Radio for Freenove FNK0114L.");
+  Serial.printf("Booting CYD PET Radio for Freenove FNK0114L. Display: %s; "
+                "profile: %s.\n",
+                USER_SETUP_INFO, BUILD_PROFILE_NAME);
 #else
-  Serial.println("Booting CYD PET Radio for CYD.");
+  Serial.printf("Booting CYD PET Radio for CYD. Display: %s; profile: %s.\n",
+                USER_SETUP_INFO, BUILD_PROFILE_NAME);
 #endif
   display.init();
   display.setRotation(1);
   display.fillScreen(TFT_BLACK);
+#if !defined(CYD_LOW_MEMORY_DIRECT_RENDER)
   screenFrameBuffer.setColorDepth(8);
   if (!screenFrameBuffer.createSprite(DISPLAY_WIDTH, DISPLAY_HEIGHT)) {
     Serial.printf("ERROR: could not allocate %u-byte screen frame buffer; "
@@ -2917,6 +3078,20 @@ void setup() {
       delay(1000);
     }
   }
+  displayFramebufferReady = true;
+#else
+  petPanelFrameBuffer.setColorDepth(8);
+  petPanelFramebufferReady =
+      petPanelFrameBuffer.createSprite(CAT_PANEL_WIDTH, DISPLAY_HEIGHT);
+  if (!petPanelFramebufferReady) {
+    Serial.printf("ERROR: could not allocate %u-byte pet panel framebuffer.\n",
+                  static_cast<unsigned>(CAT_PANEL_WIDTH * DISPLAY_HEIGHT));
+  } else {
+    petPanelFrameBuffer.fillSprite(0x0841);
+    Serial.printf("Display uses %u-byte pet panel framebuffer.\n",
+                  static_cast<unsigned>(CAT_PANEL_WIDTH * DISPLAY_HEIGHT));
+  }
+#endif
 
 #if !defined(BOARD_FREENOVE_FNK0114L)
   touchSPI.begin(25, 39, 32, 33);

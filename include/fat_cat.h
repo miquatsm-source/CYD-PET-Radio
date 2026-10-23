@@ -8,7 +8,6 @@
 constexpr int16_t FAT_CAT_PANEL_WIDTH = 96;
 constexpr uint16_t FAT_CAT_FRAME_INTERVAL_MS = 100;
 
-void drawFatCat(TFT_eSprite &frameBuffer, uint32_t now,
-                const char *petName = "Claudia",
+void drawFatCat(TFT_eSPI &frameBuffer, uint32_t now,
                 PetDance dance = PetDance::Bounce,
                 PetOutfit outfit = PetOutfit::Tie);

@@ -195,7 +195,7 @@ void audio_process_i2s(uint32_t *sample, bool *continueI2S) {
 }
 
 // Analyze pending audio blocks and draw the spectrum with per-frame bar easing.
-void drawAudioSpectrum(TFT_eSprite &frameBuffer, uint32_t now,
+void drawAudioSpectrum(TFT_eSPI &frameBuffer, uint32_t now,
                        bool streamActive, bool enabled) {
   frameBuffer.fillRect(0, 195, FAT_CAT_PANEL_WIDTH, 45, 0x0841);
   frameBuffer.setTextDatum(MC_DATUM);

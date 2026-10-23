@@ -9,7 +9,7 @@ import math
 from PIL import Image, ImageDraw, ImageFont
 
 SCALE = 3
-WIDTH, HEIGHT = 96, 240
+WIDTH, HEIGHT = 96, 194
 FRAME_MS = 100
 FRAMES_PER_PET = 24
 
@@ -90,12 +90,12 @@ class Canvas:
         self.d.rounded_rectangle(self.p(x, y, x + w, y + h),
                                  radius=r * SCALE, fill=rgb(c))
 
-    def text(self, s, x, y, c, small=False):
-        self.d.text((x * SCALE, y * SCALE), s, fill=rgb(c), anchor="mm",
+    def text(self, s, x, y, c, small=False, anchor="mm"):
+        self.d.text((x * SCALE, y * SCALE), s, fill=rgb(c), anchor=anchor,
                     font=self.small if small else self.font)
 
 
-def draw_cat(f, pose):
+def draw_cat(f, pose, blinking):
     bob = BOUNCE[pose]
     step = KICKS[pose]
     arm = ARMS[pose]
@@ -115,10 +115,14 @@ def draw_cat(f, pose):
     f.fillCircle(24, by + arm, 4, BELLY)
     f.fillCircle(72, by + ARMS[(pose + 6) % 12], 4, BELLY)
     f.fillCircle(hx, hy, 20, FUR)
-    f.fillCircle(41, hy + 1, 2, EYE)
-    f.fillCircle(55, hy + 1, 2, EYE)
-    f.fillCircle(41, hy + 1, 1, BLACK)
-    f.fillCircle(55, hy + 1, 1, BLACK)
+    if blinking:
+        f.drawFastHLine(hx - 9, hy + 1, 6, SHADOW)
+        f.drawFastHLine(hx + 3, hy + 1, 6, SHADOW)
+    else:
+        f.fillCircle(hx - 7, hy + 1, 2, EYE)
+        f.fillCircle(hx + 7, hy + 1, 2, EYE)
+        f.fillCircle(hx - 7, hy + 1, 1, BLACK)
+        f.fillCircle(hx + 7, hy + 1, 1, BLACK)
     f.fillTriangle(45, hy + 7, 51, hy + 7, 48, hy + 10, EAR)
     f.drawLine(48, hy + 10, 45, hy + 13, BLACK)
     f.drawLine(48, hy + 10, 51, hy + 13, BLACK)
@@ -148,11 +152,11 @@ SWAY_BOB = [0, -1, -2, -3, -2, -1, 0, 1, 2, 3, 2, 1]
 WAVE = [0, 2, 4, 6, 4, 2, 0, -2, -4, -6, -4, -2]
 
 
-def sloth_face(f, cx, cy, pose):
+def sloth_face(f, cx, cy, blinking):
     mask, dark = c565(60, 40, 30), c565(30, 20, 20)
     f.fillEllipse(cx - 8, cy - 2, 6, 5, mask)
     f.fillEllipse(cx + 8, cy - 2, 6, 5, mask)
-    if pose >= 10:
+    if blinking:
         f.drawFastHLine(cx - 11, cy - 2, 7, c565(232, 216, 172))
         f.drawFastHLine(cx + 5, cy - 2, 7, c565(232, 216, 172))
     else:
@@ -166,7 +170,7 @@ def sloth_face(f, cx, cy, pose):
     f.drawLine(cx + 2, cy + 10, cx + 5, cy + 8, dark)
 
 
-def draw_willi_hanging(f, swing, bob, pose):
+def draw_willi_hanging(f, swing, bob, pose, blinking):
     branch, leaf = c565(110, 70, 35), c565(60, 170, 70)
     fur, shade = c565(150, 135, 85), c565(105, 90, 55)
     cx, by, hy = 48 + swing, 130 + bob, 98 + bob
@@ -185,10 +189,10 @@ def draw_willi_hanging(f, swing, bob, pose):
     f.fillEllipse(cx, by + 6, 13, 18, c565(190, 170, 120))
     f.fillEllipse(cx, hy, 20, 17, fur)
     f.fillEllipse(cx, hy + 4, 16, 13, c565(232, 216, 172))
-    sloth_face(f, cx, hy + 1, pose)
+    sloth_face(f, cx, hy + 1, blinking)
 
 
-def draw_willi_sitting(f, bob, pose):
+def draw_willi_sitting(f, bob, pose, blinking):
     fur, shade = c565(150, 135, 85), c565(105, 90, 55)
     by, hy = 152 + bob, 102 + bob
     foot = 181 + int(bob / 3)
@@ -209,10 +213,10 @@ def draw_willi_sitting(f, bob, pose):
     f.fillEllipse(48, hy - 18, 23, 14, c565(30, 150, 60))
     f.fillEllipse(48, hy - 20, 21, 11, c565(250, 210, 40))
     f.fillEllipse(48, hy - 22, 19, 8, c565(220, 40, 40))
-    sloth_face(f, 48, hy, pose)
+    sloth_face(f, 48, hy, blinking)
 
 
-def draw_chameleon(f, bob, pose, neon):
+def draw_chameleon(f, bob, pose, neon, blinking):
     shift_y = 26
     green, dark = c565(30, 215, 150), c565(20, 150, 105)
     light = c565(170, 255, 215)
@@ -265,8 +269,12 @@ def draw_chameleon(f, bob, pose, neon):
     f.fillEllipse(hx + 10, hy + 3, 7, 5, green)
     f.drawLine(hx + 17, hy + 6, hx + 2, hy + 8, c565(10, 70, 50))
     f.fillCircle(hx + 5, hy - 3, 7, c565(15, 110, 80))
-    f.fillCircle(hx + 5, hy - 3, 5, WHITE)
-    f.fillCircle(hx + (5, 6, 7, 6)[pose // 3], hy - 3, 3, BLACK)
+    if blinking:
+        f.fillEllipse(hx + 5, hy - 3, 5, 4, green)
+        f.drawFastHLine(hx, hy - 3, 10, dark)
+    else:
+        f.fillCircle(hx + 5, hy - 3, 5, WHITE)
+        f.fillCircle(hx + (5, 6, 7, 6)[pose // 3], hy - 3, 3, BLACK)
     f.fillCircle(hx + 15, hy + 1, 1, c565(10, 70, 50))
     if neon:
         for ang in range(190, 346, 8):
@@ -293,7 +301,7 @@ def tdiv(a, b):
     return int(a / b)
 
 
-def draw_kangaroo(f, b, pose, boombox):
+def draw_kangaroo(f, b, pose, boombox, blinking):
     fur, dark = c565(205, 150, 95), c565(160, 110, 65)
     light, pink = c565(238, 208, 165), c565(230, 150, 150)
     feet = 176 + tdiv(b, 2)
@@ -323,10 +331,18 @@ def draw_kangaroo(f, b, pose, boombox):
         f.fillCircle(77 + wave, 101 + b, 3, fur)
         f.thickLine(76 + wave, 99 + b, 74 + wave, 92 + b, 2, fur)
         f.thickLine(78 + wave, 99 + b, 80 + wave, 92 + b, 2, fur)
-    f.fillEllipse(48, 107 + b, 7, 6, light)
-    f.fillCircle(48, 105 + b, 2, BLACK)
-    f.fillCircle(43, 96 + b, 2, BLACK)
-    f.fillCircle(53, 96 + b, 2, BLACK)
+    f.fillEllipse(48, 107 + b, 8, 7, light)
+    f.fillCircle(48, 104 + b, 3, pink)
+    if blinking:
+        f.drawFastHLine(39, 96 + b, 8, dark)
+        f.drawFastHLine(49, 96 + b, 8, dark)
+    else:
+        f.fillCircle(43, 96 + b, 3, WHITE)
+        f.fillCircle(53, 96 + b, 3, WHITE)
+        f.fillCircle(43, 96 + b, 1, BLACK)
+        f.fillCircle(53, 96 + b, 1, BLACK)
+    f.drawFastVLine(48, 107 + b, 3, dark)
+    f.drawFastHLine(45, 111 + b, 7, dark)
     if boombox:
         phones = c565(40, 40, 50)
         beat = pose % 6 < 3
@@ -345,7 +361,7 @@ def draw_kangaroo(f, b, pose, boombox):
         f.thickLine(65, 123 + b, 70, 130 + b, 5, fur)
 
 
-def draw_rhino(f, b, pose, devil):
+def draw_rhino(f, b, pose, devil, blinking):
     strum = [0, 4, 8, 4]
     grey, dark = c565(150, 150, 160), c565(110, 110, 120)
     light, horn = c565(190, 190, 200), c565(240, 235, 215)
@@ -367,10 +383,14 @@ def draw_rhino(f, b, pose, devil):
     f.fillEllipse(48, 100 + b, 16, 15, light)
     f.fillTriangle(44, 92 + b, 48, 66 + b, 52, 92 + b, horn)
     f.fillTriangle(46, 88 + b, 48, 78 + b, 50, 88 + b, c565(215, 205, 180))
-    f.fillCircle(40, 98 + b, 2, BLACK)
-    f.fillCircle(56, 98 + b, 2, BLACK)
-    f.drawLine(36, 94 + b, 44, 96 + b, BLACK)
-    f.drawLine(60, 94 + b, 52, 96 + b, BLACK)
+    if blinking:
+        f.drawFastHLine(37, 98 + b, 7, dark)
+        f.drawFastHLine(53, 98 + b, 7, dark)
+    else:
+        f.fillCircle(40, 98 + b, 2, BLACK)
+        f.fillCircle(56, 98 + b, 2, BLACK)
+        f.drawLine(36, 94 + b, 44, 96 + b, BLACK)
+        f.drawLine(60, 94 + b, 52, 96 + b, BLACK)
     f.fillCircle(43, 109 + b, 1, dark)
     f.fillCircle(53, 109 + b, 1, dark)
     f.drawFastHLine(42, 114 + b, 12, c565(60, 20, 20))
@@ -406,7 +426,7 @@ def draw_rhino(f, b, pose, devil):
         f.thickLine(65, 126 + b, 70, 144 + b, 6, grey)
 
 
-def draw_moritz(f, b, pose):
+def draw_moritz(f, b, pose, blinking):
     fur, belly = c565(45, 45, 55), c565(230, 230, 235)
     pink, gold = c565(235, 150, 160), c565(240, 190, 40)
     whisker = c565(225, 225, 225)
@@ -431,7 +451,7 @@ def draw_moritz(f, b, pose):
         f.drawLine(48 + sx * 12, hy + 8, 48 + sx * 30, hy + 11, whisker)
     eye = c565(90, 220, 90)
     for sx in (-10, 10):
-        if pose >= 10:
+        if blinking:
             f.drawFastHLine(48 + sx - 4, hy - 2, 9, eye)
         else:
             f.fillEllipse(48 + sx, hy - 2, 4, 5, eye)
@@ -448,7 +468,7 @@ def draw_moritz(f, b, pose):
     f.thickLine(36, 132 + b, 50, 124 + b + tap, 5, fur)
 
 
-def draw_blitz(f, b, pose):
+def draw_blitz(f, b, pose, blinking):
     o = -5
     coat, dark = c565(150, 95, 55), c565(95, 55, 30)
     light, red = c565(190, 135, 85), c565(210, 50, 50)
@@ -469,7 +489,10 @@ def draw_blitz(f, b, pose):
     f.fillEllipse(84 + o, 90 + b, 9, 17, coat)
     f.fillEllipse(91 + o, 102 + b, 5, 5, light)
     f.fillCircle(92 + o, 102 + b, 1, BLACK)
-    f.fillCircle(83 + o, 85 + b, 2, BLACK)
+    if blinking:
+        f.drawFastHLine(80 + o, 85 + b, 6, dark)
+    else:
+        f.fillCircle(83 + o, 85 + b, 2, BLACK)
     for i in range(5):
         f.thickLine(62 + i * 2 + o, 80 + i * 8 + b, 56 + i * 2 + o,
                     86 + i * 8 + b, 3, dark)
@@ -483,7 +506,7 @@ def draw_blitz(f, b, pose):
     f.fillRoundRect(72 + o, 73 + b, 16, 3, 1, red)
 
 
-def draw_lion(f, b, pose, king):
+def draw_lion(f, b, pose, king, blinking):
     coat, light = c565(235, 185, 80), c565(250, 225, 160)
     mane, mane_d = c565(215, 130, 30), c565(170, 95, 20)
     nose, gold = c565(60, 30, 30), c565(240, 190, 40)
@@ -505,7 +528,7 @@ def draw_lion(f, b, pose, king):
     f.fillTriangle(45, 104 + b, 51, 104 + b, 48, 108 + b, nose)
     f.drawLine(48, 108 + b, 48, 112 + b, nose)
     for sx in (-7, 7):
-        if pose >= 10:
+        if blinking:
             f.drawFastHLine(48 + sx - 3, 99 + b, 7, BLACK)
         else:
             f.fillCircle(48 + sx, 99 + b, 2, BLACK)
@@ -544,7 +567,7 @@ def draw_lion(f, b, pose, king):
         f.fillCircle(86, 114 + b, 2, 0xF800)
 
 
-def draw_swan(f, b, pose, violin):
+def draw_swan(f, b, pose, violin, blinking):
     white, shade = c565(245, 245, 250), c565(200, 205, 225)
     beak, suit = c565(250, 150, 30), c565(30, 30, 40)
     ripple = tdiv(WAVE[pose], 3)
@@ -564,7 +587,10 @@ def draw_swan(f, b, pose, violin):
     f.fillCircle(hx, hy, 8, white)
     f.fillTriangle(hx + 6, hy - 3, hx + 22, hy + 2, hx + 6, hy + 7, beak)
     f.drawLine(hx + 6, hy - 3, hx + 8, hy, BLACK)
-    f.fillCircle(hx + 1, hy - 2, 2, BLACK)
+    if blinking:
+        f.drawFastHLine(hx - 2, hy - 2, 7, c565(100, 115, 135))
+    else:
+        f.fillCircle(hx + 1, hy - 2, 2, BLACK)
     if not violin:
         f.fillEllipse(hx, hy - 9, 12, 3, suit)
         f.fillRoundRect(hx - 7, hy - 21, 14, 12, 3, suit)
@@ -589,7 +615,7 @@ def draw_swan(f, b, pose, violin):
         f.thickLine(56, 146, 30, 138, 5, white)
 
 
-def draw_peacock(f, b, pose, rock):
+def draw_peacock(f, b, pose, rock, blinking):
     blue, dark = c565(20, 160, 200), c565(10, 110, 160)
     green, gold = c565(40, 200, 110), c565(240, 190, 40)
     count = 7 if rock else 9
@@ -611,7 +637,10 @@ def draw_peacock(f, b, pose, rock):
     f.thickLine(50, 128 + b, 52, 112 + b, 6, blue)
     f.fillCircle(52, 106 + b, 9, blue)
     f.fillTriangle(58, 104 + b, 68, 109 + b, 58, 112 + b, gold)
-    f.fillCircle(55, 103 + b, 2, BLACK)
+    if blinking and not rock:
+        f.drawFastHLine(52, 103 + b, 7, dark)
+    elif not rock:
+        f.fillCircle(55, 103 + b, 2, BLACK)
     for dx in (-3, 0, 3):
         f.thickLine(52 + dx, 98 + b, 52 + dx * 2, 88 + b, 1, dark)
         f.fillCircle(52 + dx * 2, 87 + b, 2, green)
@@ -627,7 +656,7 @@ def draw_peacock(f, b, pose, rock):
         f.fillCircle(18 + wave, 116 + b, 5, c565(110, 110, 120))
 
 
-def draw_budgie(f, b, pose, glitter):
+def draw_budgie(f, b, pose, glitter, blinking):
     blue, dark = c565(30, 180, 230), c565(10, 110, 160)
     yellow, orange = c565(250, 230, 90), c565(240, 150, 40)
     gold = c565(240, 190, 40)
@@ -643,7 +672,7 @@ def draw_budgie(f, b, pose, glitter):
     f.fillEllipse(54, 102 + b, 13, 8, yellow)
     f.fillTriangle(62, 92 + b, 76, 96 + b, 62, 102 + b, orange)
     f.fillCircle(56, 88 + b, 4, WHITE)
-    if pose >= 10:
+    if blinking:
         f.drawFastHLine(52, 88 + b, 9, yellow)
     else:
         f.fillCircle(57, 88 + b, 2, BLACK)
@@ -682,41 +711,41 @@ def draw_budgie(f, b, pose, glitter):
         f.fillEllipse(20, 134 + b, 5, 8, c565(230, 200, 120))
 
 
-def draw_animal(f, index, bob, pose, dance="bounce"):
+def draw_animal(f, index, bob, pose, dance="bounce", blinking=False):
     x, y = 48, 137 + bob
     fur, shadow = FUR, SHADOW
     if index == 1:
-        draw_peacock(f, bob, pose, dance == "sway")
+        draw_peacock(f, bob, pose, dance == "sway", blinking)
         return
     if index == 10:
-        draw_budgie(f, bob, pose, dance == "sway")
+        draw_budgie(f, bob, pose, dance == "sway", blinking)
         return
     if index == 2:
-        draw_lion(f, bob, pose, dance == "sway")
+        draw_lion(f, bob, pose, dance == "sway", blinking)
         return
     if index == 5:
-        draw_swan(f, bob, pose, dance == "sway")
+        draw_swan(f, bob, pose, dance == "sway", blinking)
         return
     if index == 3:
-        draw_kangaroo(f, bob, pose, dance == "sway")
+        draw_kangaroo(f, bob, pose, dance == "sway", blinking)
         return
     if index == 6:
-        draw_moritz(f, bob, pose)
+        draw_moritz(f, bob, pose, blinking)
         return
     if index == 7:
-        draw_rhino(f, bob, pose, dance == "sway")
+        draw_rhino(f, bob, pose, dance == "sway", blinking)
         return
     if index == 9:
-        draw_blitz(f, bob, pose)
+        draw_blitz(f, bob, pose, blinking)
         return
     if index == 4:
-        draw_chameleon(f, bob, pose, dance == "sway")
+        draw_chameleon(f, bob, pose, dance == "sway", blinking)
         return
     if index == 8:
         if dance == "sway":
-            draw_willi_hanging(f, SWAY[pose] * 2, bob, pose)
+            draw_willi_hanging(f, SWAY[pose] * 2, bob, pose, blinking)
         else:
-            draw_willi_sitting(f, bob, pose)
+            draw_willi_sitting(f, bob, pose, blinking)
         return
     if index == 1:  # Peacock
         for feather in range(7):
@@ -795,7 +824,10 @@ def draw_animal(f, index, bob, pose, dance="bounce"):
         f.fillEllipse(x + 17, y - 25, 11, 18, 0x9A65)
         f.fillTriangle(x + 12, y - 37, x + 10, y - 51, x + 18, y - 38, shadow)
         f.fillTriangle(x + 20, y - 37, x + 27, y - 49, x + 26, y - 34, shadow)
-        f.fillCircle(x + 20, y - 26, 2, BLACK)
+        if blinking:
+            f.drawFastHLine(x + 17, y - 26, 6, shadow)
+        else:
+            f.fillCircle(x + 20, y - 26, 2, BLACK)
         f.drawLine(x - 17, y + 13, x - 19, 183 + bob, shadow)
         f.drawLine(x - 3, y + 15, x - 2, 183 - bob, shadow)
         f.drawLine(x + 11, y + 10, x + 13, 183 + bob, shadow)
@@ -804,7 +836,10 @@ def draw_animal(f, index, bob, pose, dance="bounce"):
         f.fillEllipse(x, y, 21, 27, 0x07FF)
         f.fillEllipse(x - 3, y + 3, 11, 20, 0x05BF)
         f.fillCircle(x + 10, y - 21, 17, 0x07FF)
-        f.fillCircle(x + 5, y - 24, 2, BLACK)
+        if blinking:
+            f.drawFastHLine(x + 2, y - 24, 7, 0x07FF)
+        else:
+            f.fillCircle(x + 5, y - 24, 2, BLACK)
         f.fillTriangle(x + 23, y - 22, x + 35, y - 17, x + 23, y - 13, 0xFD20)
         f.fillTriangle(x + 3, y - 37, x - 1, y - 49, x + 10, y - 37, 0x05BF)
         f.fillTriangle(x + 14, y - 36, x + 24, y - 45, x + 21, y - 32, 0x05BF)
@@ -815,20 +850,21 @@ def draw_animal(f, index, bob, pose, dance="bounce"):
         f.fillCircle(82, 108, 2, CYAN)
 
 
-def render(index, pose, dance="bounce"):
-    genre, animal, name = PETS[index]
-    f = Canvas()
-    f.drawFastHLine(0, 193, WIDTH, 0x3186)
-    f.fillCircle(15, 44, 1, YELLOW)
-    f.fillCircle(77, 105, 1, YELLOW)
-    f.text(name, 48, 18, CYAN)
+def render(index, pose, dance="bounce", blinking=False):
+    _, _, name = PETS[index]
+    animation = Canvas()
     if index == 0:
-        draw_cat(f, pose)
+        draw_cat(animation, pose, blinking)
     else:
         bob = SWAY_BOB[pose] if dance == "sway" else BOUNCE[pose]
-        draw_animal(f, index, bob, pose, dance)
-    f.text(genre, 48, 209, CYAN, small=True)
-    f.text(f"{animal} {name}", 48, 226, WHITE, small=True)
+        draw_animal(animation, index, bob, pose, dance, blinking)
+
+    f = Canvas()
+    f.text(name, 48, 18, CYAN)
+    f.drawFastHLine(0, 31, WIDTH, 0x4208)
+    animation_crop = animation.image.crop(
+        (0, 32 * SCALE, WIDTH * SCALE, HEIGHT * SCALE))
+    f.image.paste(animation_crop, (0, 32 * SCALE))
     return f.image
 
 
@@ -846,7 +882,7 @@ def main():
     frames = []
     for index, dance in SHOWS:
         for t in range(FRAMES_PER_PET):
-            frames.append(render(index, t % 12, dance))
+            frames.append(render(index, t % 12, dance, t in (18, 19)))
     out = Path(__file__).resolve().parent.parent / "docs" / "pets.gif"
     out.parent.mkdir(exist_ok=True)
     frames[0].save(out, save_all=True, append_images=frames[1:],
