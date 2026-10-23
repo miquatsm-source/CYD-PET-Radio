@@ -32,7 +32,7 @@ jobs:
         run: |
           pio run -e esp32dev-fast-low-memory
           pio run -e esp32dev-ili9341-low-memory
-          pio run -e fnk0114l
+          pio run -e fnk0114l-low-memory
 
       - name: Assemble website and firmware
         env:
@@ -48,7 +48,7 @@ jobs:
             case "$target" in
               cyd) env_name=esp32dev-fast-low-memory ;;
               cyd-ili9341) env_name=esp32dev-ili9341-low-memory ;;
-              freenove) env_name=fnk0114l ;;
+              freenove) env_name=fnk0114l-low-memory ;;
             esac
             cp ".pio/build/$env_name/bootloader.bin" "site/firmware/$target/bootloader.bin"
             cp ".pio/build/$env_name/partitions.bin" "site/firmware/$target/partitions.bin"

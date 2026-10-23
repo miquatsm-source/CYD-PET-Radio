@@ -39,7 +39,11 @@ constexpr int16_t HOME_UI_WIDTH = 210;
 constexpr int16_t MENU_UI_LEFT = 12;
 constexpr int16_t MENU_UI_WIDTH = DISPLAY_WIDTH - 2 * MENU_UI_LEFT;
 #if defined(BOARD_FREENOVE_FNK0114L)
+#if defined(CYD_LOW_MEMORY_DIRECT_RENDER)
+constexpr char BUILD_PROFILE_NAME[] = "fnk0114l-low-memory";
+#else
 constexpr char BUILD_PROFILE_NAME[] = "fnk0114l";
+#endif
 #elif defined(ILI9341_DRIVER)
 #if defined(CYD_LOW_MEMORY_DIRECT_RENDER)
 constexpr char BUILD_PROFILE_NAME[] = "esp32dev-ili9341-low-memory";
@@ -182,8 +186,10 @@ TFT_eSPI display;
 // Composite the UI and cat before pushing one complete frame to the TFT.
 TFT_eSprite screenFrameBuffer(&display);
 TFT_eSprite petPanelFrameBuffer(&display);
+TFT_eSprite homeUpdateFrameBuffer(&display);
 bool displayFramebufferReady = false;
 bool petPanelFramebufferReady = false;
+bool homeUpdateFramebufferReady = false;
 TFT_eSPI *renderTarget = &display;
 int16_t UI_LEFT = HOME_UI_LEFT;
 int16_t UI_WIDTH = HOME_UI_WIDTH;
@@ -221,7 +227,7 @@ uint8_t editorIndex = 0;
 uint8_t deleteIndex = 0;
 TouchCalibration touchCalibration{};
 #if defined(BOARD_FREENOVE_FNK0114L)
-uint16_t freenoveTouchCalibration[5]{};
+TouchCalibration freenoveTouchCalibration{};
 #endif
 Screen currentScreen = Screen::Home;
 Screen keyboardReturnScreen = Screen::Wifi;
@@ -234,6 +240,11 @@ String editUrl;
 String keyboardValue;
 String streamTitle;
 String streamStation;
+String displayedHomeStation;
+String displayedHomeTitleFirst;
+String displayedHomeTitleSecond;
+String displayedHomeCodec;
+String displayedHomeBitrate;
 String statusMessage = "Set up Wi-Fi";
 
 bool touchHeld = false;
@@ -254,6 +265,9 @@ bool stationListFromSettings = false;
 uint8_t keyboardPage = 0;
 bool uiDirty = true;
 bool audioDirty = false;
+bool homeMetadataDirty = false;
+bool homeBitrateDirty = false;
+bool homeClockDirty = false;
 // bool displayReady = false;  // No code reads this flag.
 volatile uint8_t wifiDisconnectReason = 0;
 volatile bool wifiDisconnectReasonPending = false;
@@ -1037,62 +1051,29 @@ String wifiStatusText() {
   return statusMessage;
 }
 
+void drawHomeTop(int16_t originX, int16_t originY);
+void drawHomeMetadata(int16_t originX, int16_t originY);
+void drawHomeBitrate(const String &bitrateText, int16_t originX,
+                     int16_t originY);
+
+void drawHomeTextField(const String &previousText, const String &text,
+                       int16_t x, int16_t y, uint8_t datum, uint8_t font,
+                       uint16_t color) {
+  renderTarget->setTextDatum(datum);
+  if (!previousText.isEmpty()) {
+    renderTarget->setTextColor(backgroundColor, backgroundColor);
+    renderTarget->drawString(previousText, x, y, font);
+  }
+  renderTarget->setTextColor(color, backgroundColor);
+  renderTarget->drawString(text, x, y, font);
+}
+
 // Draw the home-screen radio controls, stream metadata, clock, and timer entry.
 void drawHome() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("PET RADIO");
-  struct tm localTime {};
-  char clockText[24] = "--.--.---- --:--";
-  if (getLocalTime(&localTime, 0)) {
-    snprintf(clockText, sizeof(clockText), "%02d.%02d.%04d %02d:%02d",
-             localTime.tm_mday, localTime.tm_mon + 1,
-             localTime.tm_year + 1900, localTime.tm_hour, localTime.tm_min);
-  }
-  display.setTextDatum(TR_DATUM);
-  display.setTextColor(primaryTextColor(), backgroundColor);
-  display.drawString(clockText, UI_LEFT + UI_WIDTH, 2, 1);
-  drawButton(UI_LEFT + UI_WIDTH - 48, 14, 48, 16, "TIMER",
-             PANEL_LIGHT, TFT_WHITE, 1);
-
-  const bool connected = WiFi.status() == WL_CONNECTED;
-  const int codecId =
-      connected && streamActive ? radioAudio.getCodec() : 0;
-  const uint32_t bitrateKbps =
-      connected && streamActive ? (radioAudio.getBitRate() + 500) / 1000 : 0;
-  const char *codecName = "";
-  if (codecId == 9) {
-    codecName = "AAC";
-  } else if (codecId > 0 && codecId < 9) {
-    codecName = radioAudio.getCodecname();
-  }
-
-  display.fillRoundRect(UI_LEFT, 36, UI_WIDTH, 62, 7, PANEL);
-  display.setTextDatum(TL_DATUM);
-  display.setTextColor(primaryTextColor(), PANEL);
-  const String stationName =
-      stationCount == 0 ? "No stations" : stations[selectedStation].name;
-  display.drawString(fittedText(stationName, UI_WIDTH - 14), UI_LEFT + 7, 39,
-                     2);
-  display.setTextColor(TEXT_MUTED, PANEL);
-  String subtitle = streamTitle.isEmpty()
-                        ? (streamStation.isEmpty() ? statusMessage
-                                                   : streamStation)
-                        : streamTitle;
-  const TwoLineText titleLines =
-      wrappedText(subtitle, UI_WIDTH - 14, 2);
-  display.drawString(titleLines.first, UI_LEFT + 7, 58, 2);
-  if (!titleLines.second.isEmpty()) {
-    display.drawString(titleLines.second, UI_LEFT + 7, 74, 2);
-  }
-  display.setTextColor(TEXT_MUTED, PANEL);
-  display.setTextDatum(TL_DATUM);
-  display.drawString(codecName, UI_LEFT + 7, 91, 1);
-  display.setTextDatum(TR_DATUM);
-  display.drawString(bitrateKbps == 0
-                         ? "-- kbit/s"
-                         : String(bitrateKbps) + " kbit/s",
-                     UI_LEFT + UI_WIDTH - 7, 91, 1);
-
+  drawHomeTop(0, 0);
+  drawHomeMetadata(0, 0);
   drawButton(UI_LEFT, 105, 49, 36, "|<", PANEL_LIGHT);
   drawButton(UI_LEFT + 55, 105, 100, 36,
              streamActive ? "PAUSE" : "PLAY", PANEL_LIGHT);
@@ -1113,6 +1094,119 @@ void drawHome() {
 
   drawButton(UI_LEFT, 190, 99, 36, "STATIONS", PANEL_LIGHT);
   drawButton(UI_LEFT + 105, 190, 105, 36, "MENU", PANEL_LIGHT);
+}
+
+void drawHomeTop(int16_t originX, int16_t originY) {
+  TFT_eSPI &display = *renderTarget;
+  struct tm localTime {};
+  char clockText[24] = "--.--.---- --:--";
+  if (getLocalTime(&localTime, 0)) {
+    snprintf(clockText, sizeof(clockText), "%02d.%02d.%04d %02d:%02d",
+             localTime.tm_mday, localTime.tm_mon + 1,
+             localTime.tm_year + 1900, localTime.tm_hour, localTime.tm_min);
+  }
+  display.setTextDatum(TR_DATUM);
+  display.setTextColor(primaryTextColor(), backgroundColor);
+  display.drawString(clockText, UI_LEFT + UI_WIDTH - originX,
+                     2 - originY, 1);
+  drawButton(UI_LEFT + UI_WIDTH - 48 - originX, 14 - originY, 48, 16,
+             "TIMER", PANEL_LIGHT, TFT_WHITE, 1);
+}
+
+void drawHomeMetadata(int16_t originX, int16_t originY) {
+  TFT_eSPI &display = *renderTarget;
+  const int16_t left = UI_LEFT - originX;
+  const int16_t top = 36 - originY;
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  const int codecId =
+      connected && streamActive ? radioAudio.getCodec() : 0;
+  const uint32_t bitrateKbps =
+      connected && streamActive ? (radioAudio.getBitRate() + 500) / 1000 : 0;
+  const char *codecName = "";
+  if (codecId == 9) {
+    codecName = "AAC";
+  } else if (codecId > 0 && codecId < 9) {
+    codecName = radioAudio.getCodecname();
+  }
+
+  display.setTextDatum(TL_DATUM);
+  display.setTextColor(primaryTextColor(), backgroundColor);
+  const String stationName =
+      stationCount == 0 ? "No stations" : stations[selectedStation].name;
+  const String fittedStationName =
+      fittedText(stationName, UI_WIDTH - 14, 2);
+  drawHomeTextField(displayedHomeStation, fittedStationName, left + 7,
+                    top + 3, TL_DATUM, 2, primaryTextColor());
+  displayedHomeStation = fittedStationName;
+  String subtitle = streamTitle.isEmpty()
+                        ? (streamStation.isEmpty() ? statusMessage
+                                                   : streamStation)
+                        : streamTitle;
+  const TwoLineText titleLines =
+      wrappedText(subtitle, UI_WIDTH - 14, 2);
+  drawHomeTextField(displayedHomeTitleFirst, titleLines.first, left + 7,
+                    top + 22, TL_DATUM, 2, TEXT_MUTED);
+  displayedHomeTitleFirst = titleLines.first;
+  drawHomeTextField(displayedHomeTitleSecond, titleLines.second, left + 7,
+                    top + 38, TL_DATUM, 2, TEXT_MUTED);
+  displayedHomeTitleSecond = titleLines.second;
+  drawHomeTextField(displayedHomeCodec, codecName, left + 7, top + 55,
+                    TL_DATUM, 1, TEXT_MUTED);
+  displayedHomeCodec = codecName;
+  const String bitrateText =
+      bitrateKbps == 0 ? "-- kbit/s" : String(bitrateKbps) + " kbit/s";
+  drawHomeBitrate(bitrateText, originX, originY);
+}
+
+void drawHomeBitrate(const String &bitrateText, int16_t originX,
+                     int16_t originY) {
+  drawHomeTextField(displayedHomeBitrate, bitrateText,
+                    UI_LEFT + UI_WIDTH - 7 - originX, 91 - originY,
+                    TR_DATUM, 1, TEXT_MUTED);
+  displayedHomeBitrate = bitrateText;
+}
+
+void refreshHomeBitrate() {
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  const uint32_t bitrateKbps =
+      connected && streamActive ? (radioAudio.getBitRate() + 500) / 1000 : 0;
+  const String bitrateText =
+      bitrateKbps == 0 ? "-- kbit/s" : String(bitrateKbps) + " kbit/s";
+  renderTarget = &display;
+  drawHomeBitrate(bitrateText, 0, 0);
+  homeBitrateDirty = false;
+  renderTarget = &display;
+}
+
+void refreshHomeMetadata() {
+  renderTarget = &display;
+  drawHomeMetadata(0, 0);
+  homeMetadataDirty = false;
+  homeBitrateDirty = false;
+  renderTarget = &display;
+}
+
+void refreshHomeClock() {
+  constexpr int16_t CLOCK_REFRESH_LEFT = 96;
+  constexpr int16_t CLOCK_REFRESH_WIDTH = HOME_UI_WIDTH - CLOCK_REFRESH_LEFT;
+  if (homeUpdateFramebufferReady) {
+    renderTarget = &homeUpdateFrameBuffer;
+    homeUpdateFrameBuffer.fillSprite(backgroundColor);
+    drawHomeTop(UI_LEFT, 0);
+    homeUpdateFrameBuffer.drawFastHLine(CLOCK_REFRESH_LEFT, 31,
+                                        CLOCK_REFRESH_WIDTH, 0x4208);
+    homeUpdateFrameBuffer.pushSprite(UI_LEFT, 0, CLOCK_REFRESH_LEFT, 0,
+                                     CLOCK_REFRESH_WIDTH, 32);
+  } else {
+    renderTarget = &display;
+    display.fillRect(UI_LEFT + CLOCK_REFRESH_LEFT, 0, CLOCK_REFRESH_WIDTH, 32,
+                     backgroundColor);
+    drawHomeTop(0, 0);
+    display.drawFastHLine(UI_LEFT + CLOCK_REFRESH_LEFT, 31,
+                          CLOCK_REFRESH_WIDTH, 0x4208);
+  }
+  homeClockDirty = false;
+  renderTarget = &display;
 }
 
 // Route touches on the timer panel to duration, start, pause, or confirm actions.
@@ -1622,6 +1716,9 @@ void renderScreen() {
   if (currentScreen == Screen::Home) {
     renderTarget->resetViewport();
     drawCatFrame(millis(), true);
+    homeMetadataDirty = false;
+    homeBitrateDirty = false;
+    homeClockDirty = false;
   } else if (displayFramebufferReady) {
     screenFrameBuffer.pushSprite(0, 0);
   }
@@ -1680,6 +1777,16 @@ bool fitTouchCalibration(const uint16_t *rawX, const uint16_t *rawY,
   return fit.valid;
 }
 
+bool isTouchCalibrationValid(const TouchCalibration &calibration) {
+  const float determinant =
+      calibration.xRawX * calibration.yRawY -
+      calibration.xRawY * calibration.yRawX;
+  return isfinite(calibration.xRawX) && isfinite(calibration.xRawY) &&
+         isfinite(calibration.xOffset) && isfinite(calibration.yRawX) &&
+         isfinite(calibration.yRawY) && isfinite(calibration.yOffset) &&
+         fabsf(determinant) > 1e-6f;
+}
+
 // Draw one calibration target and wait for the user to touch its center.
 void drawCalibrationTarget(uint8_t index) {
   display.fillScreen(backgroundColor);
@@ -1725,36 +1832,6 @@ void waitForTouchRelease() {
 
 // Collect calibration points and persist the mapping for the active board.
 void calibrateTouchscreen() {
-#if defined(BOARD_FREENOVE_FNK0114L)
-  display.fillScreen(backgroundColor);
-  display.setTextDatum(TC_DATUM);
-  display.setTextColor(primaryTextColor(), backgroundColor);
-  display.drawString("Touch calibration", display.width() / 2, 18, 2);
-  display.drawCentreString("Touch each corner mark", display.width() / 2, 48,
-                           2);
-  Serial.println("Touchscreen calibration started; touch all four corner marks.");
-  display.calibrateTouch(freenoveTouchCalibration, TFT_CYAN, backgroundColor,
-                        15);
-  Serial.println("Touchscreen calibration completed.");
-  if (freenoveTouchCalibration[1] < 500 ||
-      freenoveTouchCalibration[3] < 500) {
-    Serial.println("ERROR: Freenove touchscreen calibration range is invalid.");
-    setStatus("Touch calibration failed");
-    return;
-  }
-  display.setTouch(freenoveTouchCalibration);
-  bool saved = true;
-  for (uint8_t index = 0; index < 5; ++index) {
-    if (preferences.putUShort(("fcal" + String(index)).c_str(),
-                              freenoveTouchCalibration[index]) == 0) {
-      saved = false;
-    }
-  }
-  if (!saved) {
-    Serial.println("ERROR: could not save Freenove touchscreen calibration.");
-    setStatus("Could not save touch calibration");
-  }
-#else
   for (;;) {
     uint16_t measuredX[TOUCH_CALIBRATION_TARGET_COUNT]{};
     uint16_t measuredY[TOUCH_CALIBRATION_TARGET_COUNT]{};
@@ -1800,7 +1877,14 @@ void calibrateTouchscreen() {
       waitForTouchRelease();
     }
 
-    if (fitTouchCalibration(measuredX, measuredY, touchCalibration)) {
+#if defined(BOARD_FREENOVE_FNK0114L)
+    const bool calibrationFit =
+        fitTouchCalibration(measuredX, measuredY, freenoveTouchCalibration);
+#else
+    const bool calibrationFit =
+        fitTouchCalibration(measuredX, measuredY, touchCalibration);
+#endif
+    if (calibrationFit) {
       break;
     }
 
@@ -1812,6 +1896,16 @@ void calibrateTouchscreen() {
     delay(1500);
   }
 
+#if defined(BOARD_FREENOVE_FNK0114L)
+  const bool saved =
+      preferences.putFloat("ftXx", freenoveTouchCalibration.xRawX) > 0 &&
+      preferences.putFloat("ftXy", freenoveTouchCalibration.xRawY) > 0 &&
+      preferences.putFloat("ftXo", freenoveTouchCalibration.xOffset) > 0 &&
+      preferences.putFloat("ftYx", freenoveTouchCalibration.yRawX) > 0 &&
+      preferences.putFloat("ftYy", freenoveTouchCalibration.yRawY) > 0 &&
+      preferences.putFloat("ftYo", freenoveTouchCalibration.yOffset) > 0 &&
+      preferences.putUChar("ftVer", TOUCH_CALIBRATION_VERSION) > 0;
+#else
   const bool saved =
       preferences.putFloat("touchXx", touchCalibration.xRawX) > 0 &&
       preferences.putFloat("touchXy", touchCalibration.xRawY) > 0 &&
@@ -1820,18 +1914,20 @@ void calibrateTouchscreen() {
       preferences.putFloat("touchYy", touchCalibration.yRawY) > 0 &&
       preferences.putFloat("touchYo", touchCalibration.yOffset) > 0 &&
       preferences.putUChar("touchVer", TOUCH_CALIBRATION_VERSION) > 0;
+#endif
   if (!saved) {
     Serial.println("ERROR: could not save touchscreen calibration.");
   } else {
+#if defined(BOARD_FREENOVE_FNK0114L)
+    freenoveTouchCalibration.valid = true;
+#else
     touchCalibration.valid = true;
-  }
 #endif
+  }
 }
 
 bool readTouchPoint(int16_t &x, int16_t &y) {
 #if defined(BOARD_FREENOVE_FNK0114L)
-  uint16_t calibratedX = 0;
-  uint16_t calibratedY = 0;
   if (display.getTouchRawZ() < 350) {
     touchHeld = false;
     return false;
@@ -1845,10 +1941,17 @@ bool readTouchPoint(int16_t &x, int16_t &y) {
     return false;
   }
   lastTouchAt = now;
-  display.getTouchRaw(&calibratedX, &calibratedY);
-  display.convertRawXY(&calibratedX, &calibratedY);
-  x = calibratedX;
-  y = calibratedY;
+  uint16_t rawX = 0;
+  uint16_t rawY = 0;
+  display.getTouchRaw(&rawX, &rawY);
+  x = constrain(lroundf(freenoveTouchCalibration.xRawX * rawX +
+                        freenoveTouchCalibration.xRawY * rawY +
+                        freenoveTouchCalibration.xOffset),
+                0, display.width() - 1);
+  y = constrain(lroundf(freenoveTouchCalibration.yRawX * rawX +
+                        freenoveTouchCalibration.yRawY * rawY +
+                        freenoveTouchCalibration.yOffset),
+                0, display.height() - 1);
   return true;
 #else
   if (!touchscreenTouched()) {
@@ -3091,6 +3194,17 @@ void setup() {
     Serial.printf("Display uses %u-byte pet panel framebuffer.\n",
                   static_cast<unsigned>(CAT_PANEL_WIDTH * DISPLAY_HEIGHT));
   }
+  homeUpdateFrameBuffer.setColorDepth(8);
+  homeUpdateFramebufferReady =
+      homeUpdateFrameBuffer.createSprite(HOME_UI_WIDTH, 62);
+  if (!homeUpdateFramebufferReady) {
+    Serial.printf("WARNING: could not allocate %u-byte home update framebuffer; "
+                  "partial updates will draw directly.\n",
+                  static_cast<unsigned>(HOME_UI_WIDTH * 62));
+  } else {
+    Serial.printf("Display uses %u-byte home update framebuffer.\n",
+                  static_cast<unsigned>(HOME_UI_WIDTH * 62));
+  }
 #endif
 
 #if !defined(BOARD_FREENOVE_FNK0114L)
@@ -3145,15 +3259,20 @@ void setup() {
   }
 
 #if defined(BOARD_FREENOVE_FNK0114L)
-  for (uint8_t index = 0; index < 5; ++index) {
-    freenoveTouchCalibration[index] =
-        preferences.getUShort(("fcal" + String(index)).c_str(), 0);
+  if (preferences.getUChar("ftVer", 0) == TOUCH_CALIBRATION_VERSION) {
+    freenoveTouchCalibration.xRawX = preferences.getFloat("ftXx", 0);
+    freenoveTouchCalibration.xRawY = preferences.getFloat("ftXy", 0);
+    freenoveTouchCalibration.xOffset = preferences.getFloat("ftXo", 0);
+    freenoveTouchCalibration.yRawX = preferences.getFloat("ftYx", 0);
+    freenoveTouchCalibration.yRawY = preferences.getFloat("ftYy", 0);
+    freenoveTouchCalibration.yOffset = preferences.getFloat("ftYo", 0);
+    freenoveTouchCalibration.valid =
+        isTouchCalibrationValid(freenoveTouchCalibration);
   }
-  if (freenoveTouchCalibration[1] < 500 ||
-      freenoveTouchCalibration[3] < 500) {
+  if (!freenoveTouchCalibration.valid) {
     calibrateTouchscreen();
   } else {
-    display.setTouch(freenoveTouchCalibration);
+    Serial.println("Freenove touchscreen calibration loaded.");
   }
 #else
   if (preferences.getUChar("touchVer", 0) == TOUCH_CALIBRATION_VERSION) {
@@ -3241,7 +3360,7 @@ void loop() {
   if (currentScreen == Screen::Home &&
       now - lastClockUpdateAt >= CLOCK_UPDATE_INTERVAL_MS) {
     lastClockUpdateAt = now;
-    markUiDirty();
+    homeClockDirty = true;
   }
   if (currentScreen == Screen::Home &&
       now - lastBitrateUpdateAt >= BITRATE_UPDATE_INTERVAL_MS) {
@@ -3258,7 +3377,13 @@ void loop() {
         codecId != lastDisplayedCodec) {
       lastDisplayedBitrateKbps = bitrateKbps;
       lastDisplayedCodec = codecId;
-      markUiDirty();
+      homeBitrateDirty = true;
+    }
+  }
+  if (audioDirty) {
+    audioDirty = false;
+    if (currentScreen == Screen::Home) {
+      homeMetadataDirty = true;
     }
   }
 #if defined(DIAGNOSTIC_NO_DISPLAY_DURING_AUDIO)
@@ -3272,17 +3397,30 @@ void loop() {
       if (uiDirty) {
         renderScreen();
       } else {
+        if (homeMetadataDirty) {
+          refreshHomeMetadata();
+        } else if (homeBitrateDirty) {
+          refreshHomeBitrate();
+        }
+        if (homeClockDirty) {
+          refreshHomeClock();
+        }
         drawCatFrame(now);
       }
     } else if (uiDirty) {
       renderScreen();
+    } else if (currentScreen == Screen::Home) {
+      if (homeMetadataDirty) {
+        refreshHomeMetadata();
+      } else if (homeBitrateDirty) {
+        refreshHomeBitrate();
+      }
+      if (homeClockDirty) {
+        refreshHomeClock();
+      }
     }
 #if defined(DIAGNOSTIC_NO_DISPLAY_DURING_AUDIO)
   }
 #endif
-  if (audioDirty) {
-    audioDirty = false;
-    markUiDirty();
-  }
   delay(1);
 }

@@ -25,7 +25,7 @@ the firmware images are not interchangeable.
 | Display | ST7789, 240 × 320 | ILI9341, 240 × 320 | ST7789, 240 × 320 |
 | Touch | Resistive XPT2046, dedicated SPI bus | Resistive XPT2046, dedicated SPI bus | Resistive XPT2046, shared HSPI bus |
 | Backlight | GPIO 21 | GPIO 21 | GPIO 27 |
-| PlatformIO environment | `esp32dev` (40 MHz), `esp32dev-fast` (80 MHz), or `esp32dev-fast-low-memory` for HTTPS on boards without PSRAM | `esp32dev-ili9341` (40 MHz) or `esp32dev-ili9341-low-memory` for HTTPS on boards without PSRAM | `fnk0114l` (80 MHz) |
+| PlatformIO environment | `esp32dev` (40 MHz), `esp32dev-fast` (80 MHz), or `esp32dev-fast-low-memory` for HTTPS on boards without PSRAM | `esp32dev-ili9341` (40 MHz) or `esp32dev-ili9341-low-memory` for HTTPS on boards without PSRAM | `fnk0114l` (80 MHz) or `fnk0114l-low-memory` for HTTPS |
 | Display setup | `include/cyd_user_setup.h` | `include/cyd_ili9341_setup.h` | `include/freenove_fnk0114l_setup.h` |
 
 Both boards use the ESP32's built-in DAC on GPIO 26 for mono speaker output.
@@ -39,21 +39,21 @@ hardware and pin assignments are not confirmed as compatible.
 
 The `esp32dev-fast` environment uses an 80 MHz SPI clock and may be unstable
 on some CYD boards. Use `esp32dev` if the ST7789 display shows artifacts.
-The `esp32dev-fast-low-memory` and `esp32dev-ili9341-low-memory` environments
-render the home-screen animation and spectrum into a small 8-bit panel sprite
-instead of allocating a full-screen sprite. The pet name is shown as a static
-header, separated from the animation by a continuous line. Animation drawing
-is clipped between that header and the spectrum; the complete panel is pushed
-as one frame to reduce flicker. This frees internal heap for HTTPS/TLS on boards
-without PSRAM; the audio input buffer is unchanged.
+The low-memory environments render the home-screen animation and spectrum into
+a small 8-bit panel sprite instead of allocating a full-screen sprite. The pet
+name is shown as a static header, separated from the animation by a continuous
+line. Animation drawing is clipped between that header and the spectrum; the
+complete panel is pushed as one frame to reduce flicker. This frees internal
+heap for HTTPS/TLS; the audio input buffer is unchanged.
 At boot, the serial log reports the detected display setup and the active
 PlatformIO profile to help identify firmware/display mismatches.
 
 ## Radio controls
 
-On first boot, touch the calibration targets that appear (five points on CYD
-boards). To repeat the calibration later, open **MENU > DISPLAY & TOUCH** and
-tap **RECALIBRATE TOUCHSCREEN**.
+On first boot, touch the five calibration targets that appear. The firmware
+fits an affine touch mapping to all five measurements to compensate for axis
+skew and rotation. To repeat calibration later, open **MENU > DISPLAY & TOUCH**
+and tap **RECALIBRATE TOUCHSCREEN**.
 Open **MENU > WI-FI** to enter the Wi-Fi network name and password with the
 touchscreen keyboard, then tap **CONNECT**. The radio starts its selected
 station once Wi-Fi connects.
@@ -208,8 +208,8 @@ After enabling GitHub Pages for this repository with **Settings > Pages >
 Build and deployment > GitHub Actions**, choose the matching board button on
 the [web flasher](https://tsm-source.github.io/CYD-PET-Radio/). Every push to
 `main` builds the three firmware variants and deploys the flasher
-automatically. The two CYD options use the low-memory builds, which reserve more
-internal heap for HTTPS/TLS streams; the Freenove build is unchanged.
+automatically. All three options use low-memory builds, which reserve more
+internal heap for HTTPS/TLS streams.
 
 Use a desktop browser that supports Web Serial, such as Chrome or Edge, and a
 USB data cable. If the flasher offers to erase the device, erasing also
@@ -231,6 +231,8 @@ pio run -e esp32dev-ili9341
 pio run -e esp32dev-ili9341 -t upload
 pio run -e fnk0114l
 pio run -e fnk0114l -t upload
+pio run -e fnk0114l-low-memory
+pio run -e fnk0114l-low-memory -t upload
 ```
 
 ### Diagnose audio stutter on the ILI9341 CYD
