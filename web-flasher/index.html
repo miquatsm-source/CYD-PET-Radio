@@ -58,6 +58,43 @@
         text-align: center;
       }
 
+      .board-options {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+
+      .board-tile {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        padding: 1rem;
+        border: 1px solid #4b5563;
+        border-radius: 0.75rem;
+        background: #111827;
+      }
+
+      .board-tile h3 {
+        margin: 0;
+        color: #67e8f9;
+        font-size: 1.1rem;
+      }
+
+      .board-tile p {
+        flex-grow: 1;
+      }
+
+      .board-tile .install {
+        margin: 1rem 0 0;
+      }
+
+      @media (max-width: 36rem) {
+        .board-options {
+          grid-template-columns: 1fr;
+        }
+      }
+
       a {
         color: #7dd3fc;
       }
@@ -85,21 +122,29 @@
         so the firmware images are not interchangeable.
       </p>
       <h2>Supported boards</h2>
-      <h2>CYD 2.8″ ST7789</h2>
-      <p>2.8-inch, 240 × 320 ST7789 display with resistive XPT2046 touch.</p>
-      <p class="install">
-        <esp-web-install-button manifest="./manifest.json"></esp-web-install-button>
-      </p>
-      <h2>CYD 2.8″ ILI9341 (ESP32-2432S028R)</h2>
-      <p>2.8-inch, 240 × 320 ILI9341 display with resistive XPT2046 touch.</p>
-      <p class="install">
-        <esp-web-install-button manifest="./manifest-cyd-ili9341.json"></esp-web-install-button>
-      </p>
-      <h2>Freenove FNK0114L 3.2″</h2>
-      <p>3.2-inch, 240 × 320 ST7789 display with resistive XPT2046 touch.</p>
-      <p class="install">
-        <esp-web-install-button manifest="./manifest-freenove.json"></esp-web-install-button>
-      </p>
+      <section class="board-options" aria-label="Choose your display">
+        <article class="board-tile">
+          <h3>CYD 2.8″ ST7789</h3>
+          <p>2.8-inch, 240 × 320 ST7789 TFT display with resistive XPT2046 touch.</p>
+          <p class="install">
+            <esp-web-install-button manifest="./manifest.json"></esp-web-install-button>
+          </p>
+        </article>
+        <article class="board-tile">
+          <h3>CYD 2.8″ ILI9341 (ESP32-2432S028R)</h3>
+          <p>2.8-inch, 240 × 320 ILI9341 TFT display with resistive XPT2046 touch.</p>
+          <p class="install">
+            <esp-web-install-button manifest="./manifest-cyd-ili9341.json"></esp-web-install-button>
+          </p>
+        </article>
+        <article class="board-tile">
+          <h3>Freenove FNK0114L 3.2″</h3>
+          <p>3.2-inch, 240 × 320 ST7789 IPS display with resistive XPT2046 touch.</p>
+          <p class="install">
+            <esp-web-install-button manifest="./manifest-freenove.json"></esp-web-install-button>
+          </p>
+        </article>
+      </section>
       <p class="warning">
         On a new install, the flasher may offer to erase the device. Erasing
         removes the Wi-Fi credentials, station list, volume, and touchscreen
