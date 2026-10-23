@@ -11,6 +11,8 @@ generated_dir = build_dir / "generated"
 generated_dir.mkdir(parents=True, exist_ok=True)
 
 stations = []
+station_names = set()
+station_urls = set()
 with playlist_path.open(encoding="utf-8", newline="") as playlist_file:
     for line_number, row in enumerate(
         csv.reader(playlist_file, delimiter="\t"), start=1
@@ -37,13 +39,23 @@ with playlist_path.open(encoding="utf-8", newline="") as playlist_file:
             raise ValueError(
                 f"{playlist_path}:{line_number}: expected an absolute HTTP(S) stream URL"
             )
+        if name.casefold() in station_names:
+            raise ValueError(
+                f"{playlist_path}:{line_number}: duplicate station name {name!r}"
+            )
+        if url in station_urls:
+            raise ValueError(
+                f"{playlist_path}:{line_number}: duplicate stream URL {url!r}"
+            )
+        station_names.add(name.casefold())
+        station_urls.add(url)
         stations.append((name, url))
 
 if not stations:
     raise ValueError(f"{playlist_path}: playlist contains no stations")
-if len(stations) > 15:
+if len(stations) > 20:
     raise ValueError(
-        f"{playlist_path}: {len(stations)} stations exceed the firmware limit of 15"
+        f"{playlist_path}: {len(stations)} stations exceed the firmware limit of 20"
     )
 
 

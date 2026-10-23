@@ -43,7 +43,7 @@ constexpr int16_t SETTINGS_ITEM_HEIGHT = 40;
 constexpr int16_t SETTINGS_ITEM_GAP = 8;
 #endif
 constexpr int16_t SETTINGS_ITEM_START_Y = 39;
-constexpr uint8_t MAX_STATIONS = 15;
+constexpr uint8_t MAX_STATIONS = 20;
 constexpr uint8_t STATIONS_PER_PAGE = 4;
 constexpr uint8_t STATION_NAME_SIZE = 32;
 constexpr uint8_t STATION_URL_SIZE = 192;
@@ -248,6 +248,7 @@ uint32_t nextDanceChangeAt = 0;
 uint32_t lastClockUpdateAt = 0;
 uint32_t lastBitrateUpdateAt = 0;
 uint32_t lastDisplayedBitrateKbps = UINT32_MAX;
+int lastDisplayedCodec = -1;
 uint32_t lastPetChangeAt = 0;
 uint32_t lastBubbleShownAt = 0;
 uint32_t bubbleIntervalMs = MIN_BUBBLE_INTERVAL_MS;
@@ -997,8 +998,16 @@ void drawHome() {
              PANEL_LIGHT, TFT_WHITE, 1);
 
   const bool connected = WiFi.status() == WL_CONNECTED;
+  const int codecId =
+      connected && streamActive ? radioAudio.getCodec() : 0;
   const uint32_t bitrateKbps =
       connected && streamActive ? (radioAudio.getBitRate() + 500) / 1000 : 0;
+  const char *codecName = "";
+  if (codecId == 9) {
+    codecName = "AAC";
+  } else if (codecId > 0 && codecId < 9) {
+    codecName = radioAudio.getCodecname();
+  }
 
   display.fillRoundRect(UI_LEFT, 36, UI_WIDTH, 62, 7, PANEL);
   display.setTextDatum(TL_DATUM);
@@ -1018,8 +1027,10 @@ void drawHome() {
   if (!titleLines.second.isEmpty()) {
     display.drawString(titleLines.second, UI_LEFT + 7, 74, 2);
   }
-  display.setTextDatum(TR_DATUM);
   display.setTextColor(TEXT_MUTED, PANEL);
+  display.setTextDatum(TL_DATUM);
+  display.drawString(codecName, UI_LEFT + 7, 91, 1);
+  display.setTextDatum(TR_DATUM);
   display.drawString(bitrateKbps == 0
                          ? "-- kbit/s"
                          : String(bitrateKbps) + " kbit/s",
@@ -1882,6 +1893,164 @@ bool isLegacyDefaultPlaylist() {
              0;
 }
 
+// Update unchanged factory URLs in saved lists without replacing user edits.
+bool migrateDefaultStationUrls() {
+  struct UrlMigration {
+    const char *name;
+    const char *oldUrl;
+  };
+  constexpr UrlMigration migrations[] = {
+      {"WDR 2 (DE)",
+       "http://wdr-wdr2-rkn.icecast.wdr.de/wdr/wdr2/rkn/mp3/128/stream.mp3"},
+      {"SWR3 (DE)",
+       "http://swr-swr3-live.cast.addradio.de/swr/swr3/live/mp3/128/stream.mp3"},
+      {"KEXP Seattle (USA)",
+       "https://kexp-mp3-128.streamguys1.com/kexp128.mp3"},
+      {"BBC Radio 1 (UK)", "http://stream.live.vc.bbc.co.uk/bbc_radio_one"},
+      {"BBC Radio 2 (UK)", "http://stream.live.vc.bbc.co.uk/bbc_radio_two"},
+      {"Capital FM London (UK)",
+       "https://stream-capital.musicradio.com/CapitalLondonMP3"},
+      {"Heart London (UK)",
+       "https://stream-heart.musicradio.com/HeartLondonMP3"},
+  };
+  constexpr const char *factoryStationNames[] = {
+      "1LIVE (DE)", "Antenne Bayern (DE)", "WDR 2 (DE)", "SWR3 (DE)",
+      "Hit Radio FFH (DE)", "Bayern 3 (DE)", "Sunshine Live (DE)",
+      "Absolut Radio (DE)", "N-JOY (DE)", "bigFM (DE)",
+      "Radio BOB! (DE)", "Klassik Radio (DE)", "RPR1 (DE)",
+      "STAR FM Berlin (DE)", "MDR JUMP (DE)",
+      "WHTZ Z100 New York (USA)", "KIIS-FM Los Angeles (USA)",
+      "KEXP Seattle (USA)", "WFAN New York (USA)", "WLTW Lite FM NY (USA)",
+      "BBC Radio 1 (UK)", "BBC Radio 2 (UK)", "Capital FM London (UK)",
+      "Heart London (UK)", "Smooth Radio (UK)", "Absolute Radio (UK)",
+  };
+  bool mergeFactoryStations =
+      stationCount == 12 || stationCount == 14 || stationCount == 20;
+  for (uint8_t stationIndex = 0;
+       mergeFactoryStations && stationIndex < stationCount; ++stationIndex) {
+    bool knownStation = false;
+    for (const char *name : factoryStationNames) {
+      knownStation |= strcmp(stations[stationIndex].name, name) == 0;
+    }
+    for (uint8_t previous = 0; previous < stationIndex; ++previous) {
+      if (strcmp(stations[stationIndex].name, stations[previous].name) == 0) {
+        knownStation = false;
+        break;
+      }
+    }
+    mergeFactoryStations &= knownStation;
+  }
+  bool changed = false;
+  for (uint8_t stationIndex = 0; stationIndex < stationCount;) {
+    constexpr struct {
+      const char *name;
+      const char *url;
+    } englishFactoryStations[] = {
+        {"WHTZ Z100 New York (USA)", "https://stream.revma.ihrhls.com/zc1469"},
+        {"KIIS-FM Los Angeles (USA)", "https://stream.revma.ihrhls.com/zc185"},
+        {"KEXP Seattle (USA)", "https://kexp.streamguys1.com/kexp64.aac"},
+        {"KEXP Seattle (USA)",
+         "https://kexp-mp3-128.streamguys1.com/kexp128.mp3"},
+        {"WFAN New York (USA)", "https://stream.revma.ihrhls.com/zc5231"},
+        {"WLTW Lite FM NY (USA)", "https://stream.revma.ihrhls.com/zc1477"},
+        {"Capital FM London (UK)", "https://media-ice.musicradio.com/CapitalMP3"},
+        {"Capital FM London (UK)",
+         "https://stream-capital.musicradio.com/CapitalLondonMP3"},
+        {"Heart London (UK)",
+         "https://media-ice.musicradio.com/HeartLondonMP3"},
+        {"Heart London (UK)",
+         "https://stream-heart.musicradio.com/HeartLondonMP3"},
+        {"Smooth Radio (UK)", "https://media-ice.musicradio.com/SmoothUKMP3"},
+        {"Absolute Radio (UK)",
+         "https://icecast.bauerstreaming.com/absolute-radio-mp3"},
+    };
+    bool isEnglishFactoryStation = false;
+    for (const auto &entry : englishFactoryStations) {
+      isEnglishFactoryStation |=
+          strcmp(stations[stationIndex].name, entry.name) == 0 &&
+          strcmp(stations[stationIndex].url, entry.url) == 0;
+    }
+    const bool isDefaultBbcOne =
+        strcmp(stations[stationIndex].name, "BBC Radio 1 (UK)") == 0 &&
+        (strcmp(stations[stationIndex].url,
+                "http://stream.live.vc.bbc.co.uk/bbc_radio_one") == 0 ||
+         strcmp(stations[stationIndex].url,
+                "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_one&bitrate=96000") ==
+             0);
+    const bool isDefaultBbcTwo =
+        strcmp(stations[stationIndex].name, "BBC Radio 2 (UK)") == 0 &&
+        (strcmp(stations[stationIndex].url,
+                "http://stream.live.vc.bbc.co.uk/bbc_radio_two") == 0 ||
+         strcmp(stations[stationIndex].url,
+                "https://lsn.lv/bbcradio.m3u8?station=bbc_radio_two&bitrate=96000") ==
+             0);
+    if (isDefaultBbcOne || isDefaultBbcTwo || isEnglishFactoryStation) {
+      char removedStation[STATION_NAME_SIZE];
+      strlcpy(removedStation, stations[stationIndex].name,
+              sizeof(removedStation));
+      for (uint8_t next = stationIndex; next + 1 < stationCount; ++next) {
+        stations[next] = stations[next + 1];
+      }
+      --stationCount;
+      if (selectedStation > stationIndex) {
+        --selectedStation;
+      }
+      changed = true;
+      Serial.printf("Removed English-language factory station %s.\n",
+                    removedStation);
+      continue;
+    }
+    for (const UrlMigration &migration : migrations) {
+      if (strcmp(stations[stationIndex].name, migration.name) != 0 ||
+          strcmp(stations[stationIndex].url, migration.oldUrl) != 0) {
+        continue;
+      }
+      for (uint8_t defaultIndex = 0; defaultIndex < DEFAULT_STATION_COUNT;
+           ++defaultIndex) {
+        if (strcmp(DEFAULT_STATION_NAMES[defaultIndex], migration.name) == 0) {
+          strlcpy(stations[stationIndex].url, DEFAULT_STATION_URLS[defaultIndex],
+                  sizeof(stations[stationIndex].url));
+          changed = true;
+          Serial.printf("Updated saved stream URL for %s.\n", migration.name);
+          break;
+        }
+      }
+    }
+    ++stationIndex;
+  }
+  if (mergeFactoryStations) {
+    for (uint8_t defaultIndex = 0; defaultIndex < DEFAULT_STATION_COUNT;
+         ++defaultIndex) {
+      bool alreadyPresent = false;
+      for (uint8_t stationIndex = 0; stationIndex < stationCount;
+           ++stationIndex) {
+        alreadyPresent |=
+            strcmp(stations[stationIndex].name,
+                   DEFAULT_STATION_NAMES[defaultIndex]) == 0 ||
+            strcmp(stations[stationIndex].url,
+                   DEFAULT_STATION_URLS[defaultIndex]) == 0;
+      }
+      if (alreadyPresent) {
+        continue;
+      }
+      if (stationCount >= MAX_STATIONS) {
+        Serial.println("ERROR: station list is full; not all defaults fit.");
+        break;
+      }
+      strlcpy(stations[stationCount].name, DEFAULT_STATION_NAMES[defaultIndex],
+              sizeof(stations[stationCount].name));
+      strlcpy(stations[stationCount].url, DEFAULT_STATION_URLS[defaultIndex],
+              sizeof(stations[stationCount].url));
+      ++stationCount;
+      changed = true;
+    }
+  }
+  if (changed && selectedStation >= stationCount) {
+    selectedStation = stationCount == 0 ? 0 : stationCount - 1;
+  }
+  return changed;
+}
+
 // Load persisted stations, repair incomplete data, and migrate legacy entries.
 void loadStations() {
   if (!preferences.isKey("count")) {
@@ -1910,6 +2079,11 @@ void loadStations() {
       loadDefaultStations();
       saveStationList();
       Serial.println("Migrated default playlist to favorite stations.");
+    } else if (migrateDefaultStationUrls()) {
+      saveStationList();
+      if (preferences.putUChar("selected", selectedStation) == 0) {
+        Serial.println("ERROR: could not save selected station after migration.");
+      }
     }
   }
   if (stationCount == 0) {
@@ -2901,8 +3075,14 @@ void loop() {
         WiFi.status() == WL_CONNECTED && streamActive
             ? (radioAudio.getBitRate() + 500) / 1000
             : 0;
-    if (bitrateKbps != lastDisplayedBitrateKbps) {
+    const int codecId =
+        WiFi.status() == WL_CONNECTED && streamActive
+            ? radioAudio.getCodec()
+            : 0;
+    if (bitrateKbps != lastDisplayedBitrateKbps ||
+        codecId != lastDisplayedCodec) {
       lastDisplayedBitrateKbps = bitrateKbps;
+      lastDisplayedCodec = codecId;
       markUiDirty();
     }
   }

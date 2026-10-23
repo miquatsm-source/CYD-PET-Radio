@@ -52,7 +52,9 @@ The home screen provides station navigation, play/pause, and a touchscreen
 volume slider. The top-right corner shows the current Europe/Berlin time and
 date. Wi-Fi status and signal strength appear to the left of the **PET RADIO**
 heading. Station name and stream title appear below the heading, with bitrate
-under the title. Long stream titles wrap onto a second line before the bitrate.
+under the title. The detected codec (such as MP3 or AAC) appears to the left of
+the bitrate. Long stream titles wrap onto a second line before the codec and
+bitrate.
 The clock synchronizes over the internet using NTP; until synchronization, it
 shows placeholder dashes.
 
@@ -108,19 +110,25 @@ retrying every 30 seconds until Wi-Fi is available again.
 
 Open **STATIONS** or **MENU > STATIONS** to play a station, edit its name or
 stream URL, add a station, or remove one. The list is paginated and supports up
-to 15 stations. On a fresh setup, `src/playlist.csv` supplies the default
+to 20 stations. On a fresh setup, `src/playlist.csv` supplies the default
 playlist at build time. It is tab-separated with station name and HTTP(S)
 stream URL in the first two columns; later columns are ignored. The build
 validates field sizes and URL format. Currently unreachable stations should be
 removed or updated in the CSV before building.
 
-The imported list has 14 stations: 1LIVE, Antenne Bayern, WDR 2, SWR3, WHTZ
-Z100, KIIS-FM, KEXP, WFAN, WLTW, BBC Radio 1, BBC Radio 2, Capital FM, Heart,
-and Absolute Radio. Radio Hamburg was left out because its supplied URL
-returned HTTP 404 when checked. Freshly flashed devices get this playlist;
-existing personalized lists are preserved. The previous built-in three-station
-default is automatically migrated to the new list. Station URLs must be direct
-`http://` or `https://` MP3/AAC streams supported by the audio decoder.
+The default list has 15 German-language stations, including the compatible
+entries from the provided list: Hit Radio FFH, Bayern 3, Sunshine Live, Absolut
+Radio Germany, N-JOY, bigFM, Radio BOB!, Klassik Radio, RPR1, STAR FM Berlin,
+and MDR JUMP. WDR 2 and SWR3 use updated stream URLs. English-language
+stations are omitted to reduce firmware memory use. BBC is also omitted
+because its available streams use HLS, which has not been verified on the
+target boards. KISS, Virgin Radio, and talkSPORT were not added because a
+stable compatible direct stream could not be confirmed.
+Freshly flashed devices get this playlist; existing personalized lists are
+preserved. Known factory entries from the previous English-language list are
+removed, and unchanged German factory URLs are updated. The previous built-in
+three-station default is also migrated to the new list. Direct MP3 and AAC
+streams are used; HLS or other playlists may not be reliable on all boards.
 
 ## Pets
 

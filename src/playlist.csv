@@ -1,14 +1,15 @@
 1LIVE (DE)	http://wdr-1live-live.icecast.wdr.de/wdr/1live/live/mp3/128/stream.mp3	0
 Antenne Bayern (DE)	http://stream.antenne.de/antenne	0
-WDR 2 (DE)	http://wdr-wdr2-rkn.icecast.wdr.de/wdr/wdr2/rkn/mp3/128/stream.mp3	0
-SWR3 (DE)	http://swr-swr3-live.cast.addradio.de/swr/swr3/live/mp3/128/stream.mp3	0
-WHTZ Z100 New York (USA)	https://stream.revma.ihrhls.com/zc1469	0
-KIIS-FM Los Angeles (USA)	https://stream.revma.ihrhls.com/zc185	0
-KEXP Seattle (USA)	https://kexp-mp3-128.streamguys1.com/kexp128.mp3	0
-WFAN New York (USA)	https://stream.revma.ihrhls.com/zc5231	0
-WLTW Lite FM NY (USA)	https://stream.revma.ihrhls.com/zc1477	0
-BBC Radio 1 (UK)	http://stream.live.vc.bbc.co.uk/bbc_radio_one	0
-BBC Radio 2 (UK)	http://stream.live.vc.bbc.co.uk/bbc_radio_two	0
-Capital FM London (UK)	https://stream-capital.musicradio.com/CapitalLondonMP3	0
-Heart London (UK)	https://stream-heart.musicradio.com/HeartLondonMP3	0
-Absolute Radio (UK)	https://icecast.bauerstreaming.com/absolute-radio-mp3	0
+WDR 2 (DE)	https://wdr-wdr2-rheinland.icecastssl.wdr.de/wdr/wdr2/rheinland/mp3/128/stream.mp3	0
+SWR3 (DE)	https://liveradio.swr.de/sw282p3/swr3/play.mp3	0
+Hit Radio FFH (DE)	http://mp3.ffh.de/radioffh/hqlivestream.mp3	0
+Bayern 3 (DE)	https://dispatcher.rndfnk.com/br/br3/live/mp3/mid	0
+Sunshine Live (DE)	https://stream.sunshine-live.de/live/mp3-128/stream.sunshine-live.de/	0
+Absolut Radio (DE)	https://absolut-germany.live-sm.absolutradio.de/absolut-germany/stream/mp3	0
+N-JOY (DE)	https://icecast.ndr.de/ndr/njoy/live/mp3/128/stream.mp3	0
+bigFM (DE)	https://stream.bigfm.de/deutschland/aac-128/stream.bigfm.de/	0
+Radio BOB! (DE)	https://streams.radiobob.de/bob-national/mp3-192/streams.radiobob.de/	0
+Klassik Radio (DE)	http://stream.klassikradio.de/klassikradio-live/mp3-192/mediaplayer	0
+RPR1 (DE)	https://stream.rpr1.de/rpr1-live/mp3-128/stream.rpr1.de/	0
+STAR FM Berlin (DE)	https://stream.starfm.de/berlin/mp3-128/iradio	0
+MDR JUMP (DE)	https://mdr-284350-0.sslcast.mdr.de/mdr/284350/0/mp3/high/stream.mp3	0
