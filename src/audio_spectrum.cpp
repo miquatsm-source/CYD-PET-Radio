@@ -166,9 +166,6 @@ void captureSpectrumSample(uint32_t sample) {
   if (!captureEnabled) {
     return;
   }
-  if (queuedBlocks >= AUDIO_BLOCK_COUNT) {
-    return;
-  }
 
   const int16_t left = static_cast<int16_t>(sample >> 16);
   const int16_t right = static_cast<int16_t>(sample & 0xFFFF);
@@ -179,7 +176,10 @@ void captureSpectrumSample(uint32_t sample) {
     captureIndex = 0;
     lastAudioBlockAt = millis();
     writeBlock = (writeBlock + 1) % AUDIO_BLOCK_COUNT;
-    ++queuedBlocks;
+    // Keep the newest window rolling when analysis falls behind.
+    if (queuedBlocks < AUDIO_BLOCK_COUNT) {
+      ++queuedBlocks;
+    }
   }
 }
 

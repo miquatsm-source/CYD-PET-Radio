@@ -24,13 +24,27 @@ namespace {
 
 constexpr int16_t DISPLAY_WIDTH = 320;
 constexpr int16_t DISPLAY_HEIGHT = 240;
+constexpr uint8_t TOUCH_CALIBRATION_TARGET_COUNT = 5;
+constexpr int16_t TOUCH_CALIBRATION_X[TOUCH_CALIBRATION_TARGET_COUNT] = {
+    48, 271, 271, 48, DISPLAY_WIDTH / 2};
+constexpr int16_t TOUCH_CALIBRATION_Y[TOUCH_CALIBRATION_TARGET_COUNT] = {
+    36, 36, 203, 203, DISPLAY_HEIGHT / 2};
+constexpr uint8_t TOUCH_CALIBRATION_VERSION = 1;
 constexpr int16_t CAT_PANEL_WIDTH = FAT_CAT_PANEL_WIDTH;
 constexpr int16_t HOME_UI_LEFT = 103;
 constexpr int16_t HOME_UI_WIDTH = 210;
 constexpr int16_t MENU_UI_LEFT = 12;
 constexpr int16_t MENU_UI_WIDTH = DISPLAY_WIDTH - 2 * MENU_UI_LEFT;
+#if defined(BOARD_FREENOVE_FNK0114L)
+constexpr int16_t SETTINGS_ITEM_HEIGHT = 32;
+constexpr int16_t SETTINGS_ITEM_GAP = 6;
+#else
+constexpr int16_t SETTINGS_ITEM_HEIGHT = 40;
+constexpr int16_t SETTINGS_ITEM_GAP = 8;
+#endif
+constexpr int16_t SETTINGS_ITEM_START_Y = 39;
 constexpr uint8_t MAX_STATIONS = 15;
-constexpr uint8_t STATIONS_PER_PAGE = 5;
+constexpr uint8_t STATIONS_PER_PAGE = 4;
 constexpr uint8_t STATION_NAME_SIZE = 32;
 constexpr uint8_t STATION_URL_SIZE = 192;
 constexpr uint16_t CAT_FRAME_INTERVAL_MS = FAT_CAT_FRAME_INTERVAL_MS;
@@ -103,15 +117,20 @@ struct Station {
 };
 
 struct TouchCalibration {
-  uint16_t xLeft;
-  uint16_t xRight;
-  uint16_t yTop;
-  uint16_t yBottom;
+  float xRawX = 0;
+  float xRawY = 0;
+  float xOffset = 0;
+  float yRawX = 0;
+  float yRawY = 0;
+  float yOffset = 0;
+  bool valid = false;
 };
 
 enum class Screen : uint8_t {
   Home,
   Settings,
+  AudioSettings,
+  DisplaySettings,
   RgbLedSettings,
   Wifi,
   Stations,
@@ -209,6 +228,7 @@ bool audioSpectrumEnabled = true;
 bool audioCompressorEnabled = false;
 bool audioNoiseShaping = false;
 bool keyboardUppercase = false;
+bool stationListFromSettings = false;
 uint8_t keyboardPage = 0;
 bool uiDirty = true;
 bool audioDirty = false;
@@ -704,6 +724,10 @@ bool pointInRect(int16_t x, int16_t y, int16_t left, int16_t top,
   return x >= left && x < left + width && y >= top && y < top + height;
 }
 
+bool pointOnMenuBackButton(int16_t x, int16_t y) {
+  return pointInRect(x, y, UI_LEFT + UI_WIDTH - 56, 0, 56, 40);
+}
+
 void markUiDirty() {
   uiDirty = true;
 }
@@ -800,15 +824,15 @@ bool wideKeyboardLayout() {
 }
 
 int16_t keyboardKeyGap() {
-  return wideKeyboardLayout() ? 4 : 1;
+  return wideKeyboardLayout() ? 2 : 1;
 }
 
 int16_t keyboardKeyHeight() {
-  return wideKeyboardLayout() ? 32 : 25;
+  return wideKeyboardLayout() ? 34 : 25;
 }
 
 int16_t keyboardRowY(uint8_t row) {
-  return wideKeyboardLayout() ? 67 + row * 37 : 66 + row * 29;
+  return wideKeyboardLayout() ? 65 + row * 37 : 66 + row * 29;
 }
 
 int16_t keyboardKeyWidth(const String &keys) {
@@ -820,8 +844,8 @@ int16_t keyboardKeyWidth(const String &keys) {
 
 void keyboardControlBounds(uint8_t index, int16_t &x, int16_t &width) {
   if (wideKeyboardLayout()) {
-    constexpr int16_t controlWidths[] = {56, 60, 90, 54};
-    const int16_t controlsWidth = 56 + 6 + 60 + 6 + 90 + 6 + 54;
+    constexpr int16_t controlWidths[] = {64, 64, 76, 64};
+    const int16_t controlsWidth = 64 + 6 + 64 + 6 + 76 + 6 + 64;
     const int16_t controlsLeft = UI_LEFT + (UI_WIDTH - controlsWidth) / 2;
     x = controlsLeft;
     for (uint8_t i = 0; i < index; ++i) {
@@ -906,13 +930,16 @@ void drawText(const String &text, int16_t x, int16_t y, uint8_t font = 2,
 
 void drawButton(int16_t x, int16_t y, int16_t width, int16_t height,
                 const String &label, uint16_t fill = PANEL_LIGHT,
-                uint16_t colour = TFT_WHITE, uint8_t font = 2) {
+                uint16_t colour = TFT_WHITE, uint8_t font = 2,
+                bool outline = true) {
   TFT_eSPI &display = *renderTarget;
   if (fill == PANEL_LIGHT) {
     fill = BUTTON_COLORS[buttonColorIndex];
   }
   display.fillRoundRect(x, y, width, height, 7, fill);
-  display.drawRoundRect(x, y, width, height, 7, 0x4208);
+  if (outline) {
+    display.drawRoundRect(x, y, width, height, 7, 0x4208);
+  }
   display.setTextDatum(MC_DATUM);
   display.setTextColor(colour == TFT_WHITE ? primaryTextColor() : colour,
                        fill);
@@ -1040,74 +1067,91 @@ void handleTimerTouch(int16_t x, int16_t y, uint32_t now) {
   }
 }
 
-// Draw the board-specific settings and audio preference controls.
+// Draw the settings category menu.
 void drawSettings() {
-  TFT_eSPI &display = *renderTarget;
   drawPanelHeader("SETTINGS");
-#if defined(BOARD_FREENOVE_FNK0114L)
-  drawButton(UI_LEFT + UI_WIDTH - 116, 4, 62, 23, "RGB LED",
-             PANEL_LIGHT, TFT_WHITE, 1);
-#endif
-  drawButton(UI_LEFT + UI_WIDTH - 48, 4, 48, 23, "BACK", PANEL_LIGHT,
+  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
              TFT_WHITE, 1);
-  const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
-  drawButton(UI_LEFT, 36, toggleWidth, 25, "WI-FI", PANEL_LIGHT);
-  drawButton(UI_LEFT + toggleWidth + 6, 36, toggleWidth, 25, "STATION LIST",
-             PANEL_LIGHT);
-  drawButton(UI_LEFT, 63, toggleWidth, 24,
-             String("BOOST +6: ") + (audioBoost ? "ON" : "OFF"),
-             PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + toggleWidth + 6, 63, toggleWidth, 24,
-             String("SPECTRUM: ") + (audioSpectrumEnabled ? "ON" : "OFF"),
-             PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 90, toggleWidth, 24,
-             String("COMPRESSION: ") + (audioCompressorEnabled ? "ON" : "OFF"),
-             PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + toggleWidth + 6, 90, toggleWidth, 24,
-             String("GPIO4 AMP: ") + (audioAmpEnabled ? "ON" : "OFF"),
-             PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT, 117, toggleWidth, 22, "RECALIBRATE TOUCH",
-             PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + toggleWidth + 6, 117, toggleWidth, 22,
-             String("NOISE SHAPE: ") + (audioNoiseShaping ? "ON" : "OFF"),
-             PANEL_LIGHT, TFT_WHITE, 1);
+  const int16_t rowStep = SETTINGS_ITEM_HEIGHT + SETTINGS_ITEM_GAP;
+  const char *labels[] = {"AUDIO", "DISPLAY & TOUCH", "WI-FI", "STATIONS"};
+  for (uint8_t row = 0; row < 4; ++row) {
+    drawButton(UI_LEFT, SETTINGS_ITEM_START_Y + row * rowStep, UI_WIDTH,
+               SETTINGS_ITEM_HEIGHT, labels[row], PANEL_LIGHT, TFT_WHITE, 2,
+               false);
+  }
+#if defined(BOARD_FREENOVE_FNK0114L)
+  drawButton(UI_LEFT, SETTINGS_ITEM_START_Y + 4 * rowStep, UI_WIDTH,
+             SETTINGS_ITEM_HEIGHT, "RGB LED", PANEL_LIGHT, TFT_WHITE, 2,
+             false);
+#endif
+}
+
+// Draw audio options and a touch-friendly volume control.
+void drawAudioSettings() {
+  TFT_eSPI &display = *renderTarget;
+  drawPanelHeader("AUDIO");
+  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
+             TFT_WHITE, 1);
+  const String labels[] = {
+      String("AUDIO BOOST +6 dB: ") + (audioBoost ? "ON" : "OFF"),
+      String("SPECTRUM: ") + (audioSpectrumEnabled ? "ON" : "OFF"),
+      String("DYNAMIC COMPRESSION: ") +
+          (audioCompressorEnabled ? "ON" : "OFF"),
+      String("GPIO4 AMP: ") + (audioAmpEnabled ? "ON" : "OFF"),
+      String("NOISE SHAPING: ") + (audioNoiseShaping ? "ON" : "OFF")};
+  constexpr int16_t TOGGLE_START_Y = 37;
+  constexpr int16_t TOGGLE_STEP = 32;
+  constexpr int16_t TOGGLE_HEIGHT = 29;
+  for (uint8_t row = 0; row < 5; ++row) {
+    drawButton(UI_LEFT, TOGGLE_START_Y + row * TOGGLE_STEP, UI_WIDTH,
+               TOGGLE_HEIGHT, labels[row], PANEL_LIGHT, TFT_WHITE, 2, false);
+  }
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
-  display.drawString("VOLUME", UI_LEFT, 147, 1);
+  display.drawString("VOLUME", UI_LEFT, 194, 2);
   display.setTextDatum(TR_DATUM);
   display.drawString(String(volume * 100 / 21) + "%", UI_LEFT + UI_WIDTH,
-                     147, 1);
-  display.fillRoundRect(UI_LEFT, 163, UI_WIDTH, 8, 4,
+                     194, 2);
+  display.fillRoundRect(UI_LEFT, 220, UI_WIDTH, 10, 5,
                         BUTTON_COLORS[buttonColorIndex]);
   const int16_t sliderWidth =
       static_cast<int16_t>((UI_WIDTH - 4) * volume / 21);
-  display.fillRoundRect(UI_LEFT + 2, 165, sliderWidth, 4, 2, ACCENT);
-  display.fillCircle(UI_LEFT + 2 + sliderWidth, 167, 6, TFT_WHITE);
+  display.fillRoundRect(UI_LEFT + 2, 222, sliderWidth, 6, 3, ACCENT);
+  display.fillCircle(UI_LEFT + 2 + sliderWidth, 225, 8, TFT_WHITE);
+}
+
+// Draw larger color targets and a dedicated touchscreen calibration action.
+void drawDisplaySettings() {
+  TFT_eSPI &display = *renderTarget;
+  drawPanelHeader("DISPLAY & TOUCH");
+  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
+             TFT_WHITE, 1);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(primaryTextColor(), backgroundColor);
-  display.drawString("BACKGROUND", UI_LEFT, 177, 1);
-  constexpr int16_t swatchY = 188;
+  display.drawString("BACKGROUND", UI_LEFT, 39, 2);
+  constexpr int16_t SWATCH_Y = 61;
+  constexpr int16_t SWATCH_HEIGHT = 32;
   for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
     const int16_t swatchX = themeSwatchX(index);
-    display.fillRoundRect(swatchX, swatchY, themeSwatchWidth,
-                          themeSwatchHeight, 4, THEME_COLORS[index]);
+    display.fillRoundRect(swatchX, SWATCH_Y, themeSwatchWidth, SWATCH_HEIGHT,
+                          4, THEME_COLORS[index]);
     display.drawRoundRect(
-        swatchX - 1, swatchY - 1, themeSwatchWidth + 2,
-        themeSwatchHeight + 2, 5,
-        index == themeColorIndex ? primaryTextColor() : 0x4208);
+        swatchX - 1, SWATCH_Y - 1, themeSwatchWidth + 2, SWATCH_HEIGHT + 2,
+        5, index == themeColorIndex ? primaryTextColor() : 0x4208);
   }
-  display.setTextColor(primaryTextColor(), backgroundColor);
-  display.drawString("BUTTONS", UI_LEFT, 207, 1);
-  constexpr int16_t buttonSwatchY = 216;
+  display.drawString("BUTTONS", UI_LEFT, 108, 2);
+  constexpr int16_t BUTTON_SWATCH_Y = 130;
   for (uint8_t index = 0; index < BUTTON_COLOR_COUNT; ++index) {
     const int16_t swatchX = themeSwatchX(index);
-    display.fillRoundRect(swatchX, buttonSwatchY, themeSwatchWidth,
-                          themeSwatchHeight, 4, BUTTON_COLORS[index]);
+    display.fillRoundRect(swatchX, BUTTON_SWATCH_Y, themeSwatchWidth,
+                          SWATCH_HEIGHT, 4, BUTTON_COLORS[index]);
     display.drawRoundRect(
-        swatchX - 1, buttonSwatchY - 1, themeSwatchWidth + 2,
-        themeSwatchHeight + 2, 5,
+        swatchX - 1, BUTTON_SWATCH_Y - 1, themeSwatchWidth + 2,
+        SWATCH_HEIGHT + 2, 5,
         index == buttonColorIndex ? primaryTextColor() : 0x4208);
   }
+  drawButton(UI_LEFT, 184, UI_WIDTH, 42, "RECALIBRATE TOUCHSCREEN",
+             PANEL_LIGHT, TFT_WHITE, 2, false);
 }
 
 #if defined(BOARD_FREENOVE_FNK0114L)
@@ -1115,7 +1159,7 @@ void drawSettings() {
 void drawRgbLedSettings() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("RGB LED OPTIONS");
-  drawButton(UI_LEFT + UI_WIDTH - 48, 4, 48, 23, "BACK", PANEL_LIGHT,
+  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
              TFT_WHITE, 1);
   drawButton(UI_LEFT, 48, UI_WIDTH, 32,
              String("LED: ") + (rgbLedEnabled ? "ON" : "OFF"),
@@ -1263,29 +1307,30 @@ void drawWifiSettings() {
   drawPanelHeader("WI-FI SETTINGS");
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
-  display.drawString("NETWORK NAME (SSID)", UI_LEFT, 40, 1);
-  drawButton(UI_LEFT, 54, UI_WIDTH, 34,
+  display.drawString("NETWORK NAME (SSID)", UI_LEFT + 6, 37, 2);
+  drawButton(UI_LEFT, 55, UI_WIDTH, 39,
              fittedText(wifiSsid.isEmpty() ? "(Enter SSID)" : wifiSsid,
-                        UI_WIDTH - 16, 1),
-             PANEL);
+                        UI_WIDTH - 16, 2),
+             PANEL, TFT_WHITE, 2, false);
   display.setTextColor(TEXT_MUTED, backgroundColor);
-  display.drawString("PASSWORD", UI_LEFT, 97, 1);
+  display.drawString("PASSWORD", UI_LEFT + 6, 100, 2);
   String passwordPreview = passwordForDisplay(wifiPassword);
   if (wifiPassword.isEmpty()) {
     passwordPreview = "(Enter password)";
   }
-  drawButton(UI_LEFT, 111, UI_WIDTH, 34,
-             fittedText(passwordPreview, UI_WIDTH - 16, 1), PANEL);
+  drawButton(UI_LEFT, 118, UI_WIDTH, 39,
+             fittedText(passwordPreview, UI_WIDTH - 16, 2), PANEL, TFT_WHITE,
+             2, false);
 
-  drawButton(UI_LEFT, 151, UI_WIDTH, 18,
+  drawButton(UI_LEFT, 157, UI_WIDTH, 34,
              String("SHOW PASSWORD: ") + (showWifiPassword ? "ON" : "OFF"),
-             showWifiPassword ? 0x2147 : PANEL, TFT_WHITE, 1);
+             showWifiPassword ? 0x2147 : PANEL, TFT_WHITE, 2, false);
   const int16_t actionWidth = (UI_WIDTH - 8) / 2;
-  drawButton(UI_LEFT, 176, actionWidth, 32, "CONNECT",
-             wifiConnecting ? 0x3186 : ACCENT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + actionWidth + 8, 176, actionWidth, 32, "BACK",
-             PANEL_LIGHT, TFT_WHITE, 1);
-  drawText(fittedText(wifiStatusText(), UI_WIDTH, 1), UI_LEFT, 216, 1,
+  drawButton(UI_LEFT, 198, actionWidth, 32, "CONNECT",
+             wifiConnecting ? 0x3186 : ACCENT, TFT_WHITE, 2, false);
+  drawButton(UI_LEFT + actionWidth + 8, 198, actionWidth, 32, "BACK",
+             PANEL_LIGHT, TFT_WHITE, 2, false);
+  drawText(fittedText(wifiStatusText(), UI_WIDTH, 1), UI_LEFT, 231, 1,
            WiFi.status() == WL_CONNECTED ? SUCCESS : TEXT_MUTED);
 }
 
@@ -1293,58 +1338,61 @@ void drawWifiSettings() {
 void drawStations() {
   TFT_eSPI &display = *renderTarget;
   drawPanelHeader("STATION LIST");
+  drawButton(UI_LEFT + UI_WIDTH - 56, 3, 56, 32, "BACK", PANEL_LIGHT,
+             TFT_WHITE, 1);
   const uint8_t pageCount = stationPageCount();
   const uint8_t pageStart = stationListPage * STATIONS_PER_PAGE;
   const uint8_t visibleStations =
       min<uint8_t>(STATIONS_PER_PAGE, stationCount - pageStart);
-  drawText(String(stationCount) + " STATIONS", UI_LEFT, 32, 1, TEXT_MUTED);
+  drawText(String(stationCount) + " STATIONS", UI_LEFT, 34, 1, TEXT_MUTED);
   if (deleteConfirmation) {
     for (uint8_t row = 0; row < visibleStations; ++row) {
       const uint8_t i = pageStart + row;
-      const int16_t rowY = 41 + row * 27;
-      drawButton(UI_LEFT, rowY, UI_WIDTH, 24,
-                 fittedText(stations[i].name, UI_WIDTH - 10, 1),
-                 i == selectedStation ? 0x2147 : PANEL, TFT_WHITE, 1);
+      const int16_t rowY = 44 + row * 36;
+      const uint16_t fill = i == selectedStation ? 0x2147 : PANEL;
+      drawButton(UI_LEFT, rowY, 178, 32,
+                 fittedText(stations[i].name, 168, 2), fill, TFT_WHITE, 2,
+                 false);
+      drawButton(UI_LEFT + 184, rowY, 52, 32, "EDIT", PANEL_LIGHT,
+                 TFT_WHITE, 2, false);
+      drawButton(UI_LEFT + 242, rowY, 54, 32, "DEL", ERROR_COLOUR,
+                 TFT_WHITE, 2, false);
     }
-    display.fillRoundRect(UI_LEFT + 9, 83, UI_WIDTH - 18, 83, 8, PANEL_LIGHT);
-    display.drawRoundRect(UI_LEFT + 9, 83, UI_WIDTH - 18, 83, 8, TFT_CYAN);
+    display.fillRoundRect(UI_LEFT + 9, 78, UI_WIDTH - 18, 92, 8, PANEL_LIGHT);
+    display.drawRoundRect(UI_LEFT + 9, 78, UI_WIDTH - 18, 92, 8, TFT_CYAN);
     display.setTextDatum(MC_DATUM);
     display.setTextColor(primaryTextColor(), PANEL_LIGHT);
-    display.drawString("Delete station?", 208, 101, 2);
+    display.drawString("Delete station?", 160, 98, 2);
     display.drawString(
-        fittedText(stations[deleteIndex].name, 170, 1), 208, 124, 1);
-    drawButton(UI_LEFT + 14, 136, 127, 25, "CANCEL", PANEL, TFT_WHITE, 1);
-    drawButton(UI_LEFT + 147, 136, 127, 25, "DELETE", ERROR_COLOUR,
-               TFT_WHITE, 1);
+        fittedText(stations[deleteIndex].name, 240, 2), 160, 121, 2);
+    drawButton(UI_LEFT + 14, 136, 127, 28, "CANCEL", PANEL, TFT_WHITE, 2,
+               false);
+    drawButton(UI_LEFT + 147, 136, 127, 28, "DELETE", ERROR_COLOUR,
+               TFT_WHITE, 2, false);
     return;
   }
 
   for (uint8_t row = 0; row < visibleStations; ++row) {
     const uint8_t i = pageStart + row;
-    const int16_t rowY = 41 + row * 27;
+    const int16_t rowY = 44 + row * 36;
     const uint16_t fill = i == selectedStation ? 0x2147 : PANEL;
-    display.fillRoundRect(UI_LEFT, rowY, UI_WIDTH, 24, 5, fill);
-    display.setTextDatum(ML_DATUM);
-    display.setTextColor(primaryTextColor(), fill);
-    display.drawString(fittedText(stations[i].name, UI_WIDTH - 82, 2),
-                       UI_LEFT + 7, rowY + 12, 2);
-    display.setTextDatum(MC_DATUM);
-    display.setTextColor(TEXT_MUTED, fill);
-    display.drawString("E", UI_LEFT + UI_WIDTH - 48, rowY + 12, 1);
-    display.drawString("x", UI_LEFT + UI_WIDTH - 17, rowY + 12, 2);
+    drawButton(UI_LEFT, rowY, 178, 32,
+               fittedText(stations[i].name, 168, 2), fill, TFT_WHITE, 2,
+               false);
+    drawButton(UI_LEFT + 184, rowY, 52, 32, "EDIT", PANEL_LIGHT,
+               TFT_WHITE, 2, false);
+    drawButton(UI_LEFT + 242, rowY, 54, 32, "DEL", ERROR_COLOUR,
+               TFT_WHITE, 2, false);
   }
-  const int16_t controlsWidth = 36 + 4 + 36 + 4 + 52 + 4 + 100 + 4 + 52;
-  const int16_t controlsLeft = UI_LEFT + (UI_WIDTH - controlsWidth) / 2;
-  drawButton(controlsLeft, 204, 36, 25, "<", PANEL_LIGHT, TFT_WHITE, 1);
-  drawButton(controlsLeft + 40, 204, 36, 25, ">", PANEL_LIGHT, TFT_WHITE, 1);
+  drawButton(UI_LEFT, 197, 40, 36, "<", PANEL_LIGHT, TFT_WHITE, 2, false);
+  drawButton(UI_LEFT + 46, 197, 40, 36, ">", PANEL_LIGHT, TFT_WHITE, 2,
+             false);
   display.setTextDatum(MC_DATUM);
   display.setTextColor(primaryTextColor(), backgroundColor);
   display.drawString(String(stationListPage + 1) + "/" + String(pageCount),
-                     controlsLeft + 104, 216, 1);
-  drawButton(controlsLeft + 132, 204, 100, 25, "+ STATION", ACCENT,
-             TFT_WHITE, 1);
-  drawButton(controlsLeft + 236, 204, 52, 25, "BACK", PANEL_LIGHT, TFT_WHITE,
-             1);
+                     UI_LEFT + 125, 215, 2);
+  drawButton(UI_LEFT + 164, 197, 132, 36, "+ ADD", ACCENT,
+             TFT_WHITE, 2, false);
 }
 
 // Draw editable station fields and save/back actions.
@@ -1353,18 +1401,21 @@ void drawStationEditor() {
   drawPanelHeader(stationEditorIsNew ? "NEW STATION" : "EDIT STATION");
   display.setTextDatum(TL_DATUM);
   display.setTextColor(TEXT_MUTED, backgroundColor);
-  display.drawString("NAME", UI_LEFT, 40, 1);
-  drawButton(UI_LEFT, 54, UI_WIDTH, 32,
-             fittedText(editName, UI_WIDTH - 14, 1), PANEL);
+  display.drawString("NAME", UI_LEFT, 39, 2);
+  drawButton(UI_LEFT, 57, UI_WIDTH, 39,
+             fittedText(editName, UI_WIDTH - 14, 2), PANEL, TFT_WHITE, 2,
+             false);
   display.setTextColor(TEXT_MUTED, backgroundColor);
-  display.drawString("STREAM-URL", UI_LEFT, 94, 1);
-  drawButton(UI_LEFT, 108, UI_WIDTH, 32,
-             fittedText(editUrl, UI_WIDTH - 14, 1), PANEL);
+  display.drawString("STREAM URL", UI_LEFT, 104, 2);
+  drawButton(UI_LEFT, 122, UI_WIDTH, 39,
+             fittedText(editUrl, UI_WIDTH - 14, 2), PANEL, TFT_WHITE, 2,
+             false);
   const int16_t actionWidth = (UI_WIDTH - 8) / 2;
-  drawButton(UI_LEFT, 159, actionWidth, 36, "SAVE", ACCENT, TFT_WHITE, 1);
-  drawButton(UI_LEFT + actionWidth + 8, 159, actionWidth, 36, "BACK",
-             PANEL_LIGHT, TFT_WHITE, 1);
-  drawText("MP3/AAC-Stream (http/https)", UI_LEFT, 210, 1, TEXT_MUTED);
+  drawButton(UI_LEFT, 181, actionWidth, 40, "SAVE", ACCENT, TFT_WHITE, 2,
+             false);
+  drawButton(UI_LEFT + actionWidth + 8, 181, actionWidth, 40, "BACK",
+             PANEL_LIGHT, TFT_WHITE, 2, false);
+  drawText("MP3/AAC stream (HTTP/HTTPS)", UI_LEFT, 225, 1, TEXT_MUTED);
 }
 
 // Draw the adaptive on-screen keyboard for credentials and station fields.
@@ -1381,19 +1432,16 @@ void drawKeyboard() {
   const String visibleValue =
       editingPassword ? passwordForDisplay(keyboardValue) : keyboardValue;
   const int16_t valueWidth = editingPassword && !showWifiPassword
-                                 ? UI_WIDTH - (wideKeyboardLayout() ? 62 : 53)
+                                 ? UI_WIDTH - (wideKeyboardLayout() ? 78 : 70)
                                  : UI_WIDTH;
-  drawText(fittedText(visibleValue, valueWidth, 1), UI_LEFT,
-           wideKeyboardLayout() ? 38 : 40, 1, TFT_WHITE);
+  drawText(fittedText(visibleValue, valueWidth, 2), UI_LEFT,
+           wideKeyboardLayout() ? 38 : 40, 2, TFT_WHITE);
   if (editingPassword) {
-    const int16_t showWidth = wideKeyboardLayout() ? 54 : 48;
-    drawButton(UI_LEFT + UI_WIDTH - showWidth, 36, showWidth,
-               wideKeyboardLayout() ? 22 : 19,
+    const int16_t showWidth = wideKeyboardLayout() ? 70 : 62;
+    drawButton(UI_LEFT + UI_WIDTH - showWidth, 32, showWidth, 30,
                showWifiPassword ? "HIDE" : "SHOW", PANEL_LIGHT,
-               TFT_WHITE, 1);
+               TFT_WHITE, 1, false);
   }
-  const int16_t separatorY = wideKeyboardLayout() ? 61 : 58;
-  display.drawFastHLine(UI_LEFT, separatorY, UI_WIDTH, 0x4208);
 
   for (uint8_t row = 0; row < 3; ++row) {
     const String keys = keyboardRow(row);
@@ -1413,38 +1461,38 @@ void drawKeyboard() {
         label.toUpperCase();
       }
       drawButton(x, y, keyWidth, keyboardKeyHeight(), label, PANEL_LIGHT,
-                 TFT_WHITE, 2);
+                 TFT_WHITE, 2, false);
     }
   }
 
-  const int16_t controlY = wideKeyboardLayout() ? 180 : 156;
-  const int16_t controlHeight = wideKeyboardLayout() ? 26 : 24;
+  const int16_t controlY = wideKeyboardLayout() ? 177 : 156;
+  const int16_t controlHeight = wideKeyboardLayout() ? 28 : 24;
   int16_t controlX = 0;
   int16_t controlWidth = 0;
   keyboardControlBounds(0, controlX, controlWidth);
   drawButton(controlX, controlY, controlWidth, controlHeight,
              keyboardPage == 0 && !keyboardUppercase ? "abc" : "ABC",
-             PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 2, false);
   keyboardControlBounds(1, controlX, controlWidth);
   drawButton(controlX, controlY, controlWidth, controlHeight,
              keyboardPage == 0 ? "?123"
                                : keyboardPage == 1 ? "SYM2" : "SYM1",
-             PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 2, false);
   keyboardControlBounds(2, controlX, controlWidth);
   drawButton(controlX, controlY, controlWidth, controlHeight, "SPACE",
-             PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 2, false);
   keyboardControlBounds(3, controlX, controlWidth);
   drawButton(controlX, controlY, controlWidth, controlHeight, "<-",
-             PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 2, false);
   const int16_t actionY = wideKeyboardLayout() ? 211 : 192;
-  const int16_t actionHeight = wideKeyboardLayout() ? 24 : 31;
+  const int16_t actionHeight = wideKeyboardLayout() ? 25 : 31;
   const int16_t actionWidth = wideKeyboardLayout() ? (UI_WIDTH - 8) / 2 : 98;
   constexpr int16_t actionGap = 8;
   drawButton(UI_LEFT, actionY, actionWidth, actionHeight, "CANCEL",
-             PANEL_LIGHT, TFT_WHITE, 1);
+             PANEL_LIGHT, TFT_WHITE, 1, false);
   drawButton(UI_LEFT + actionWidth + actionGap, actionY,
              wideKeyboardLayout() ? actionWidth : 104, actionHeight, "DONE",
-             ACCENT, TFT_WHITE, 1);
+             ACCENT, TFT_WHITE, 1, false);
 }
 
 // Render the current screen into the sprite and then refresh the display.
@@ -1463,6 +1511,12 @@ void renderScreen() {
       break;
     case Screen::Settings:
       drawSettings();
+      break;
+    case Screen::AudioSettings:
+      drawAudioSettings();
+      break;
+    case Screen::DisplaySettings:
+      drawDisplaySettings();
       break;
 #if defined(BOARD_FREENOVE_FNK0114L)
     case Screen::RgbLedSettings:
@@ -1492,19 +1546,73 @@ void renderScreen() {
   renderTarget = &display;
 }
 
+bool fitTouchCalibration(const uint16_t *rawX, const uint16_t *rawY,
+                         TouchCalibration &fit) {
+  double meanX = 0;
+  double meanY = 0;
+  for (uint8_t i = 0; i < TOUCH_CALIBRATION_TARGET_COUNT; ++i) {
+    meanX += rawX[i];
+    meanY += rawY[i];
+  }
+  meanX /= TOUCH_CALIBRATION_TARGET_COUNT;
+  meanY /= TOUCH_CALIBRATION_TARGET_COUNT;
+
+  double xx = 0;
+  double xy = 0;
+  double yy = 0;
+  double xTargetX = 0;
+  double yTargetX = 0;
+  double xTargetY = 0;
+  double yTargetY = 0;
+  for (uint8_t i = 0; i < TOUCH_CALIBRATION_TARGET_COUNT; ++i) {
+    const double dx = rawX[i] - meanX;
+    const double dy = rawY[i] - meanY;
+    const double targetX = TOUCH_CALIBRATION_X[i];
+    const double targetY = TOUCH_CALIBRATION_Y[i];
+    xx += dx * dx;
+    xy += dx * dy;
+    yy += dy * dy;
+    xTargetX += dx * targetX;
+    yTargetX += dy * targetX;
+    xTargetY += dx * targetY;
+    yTargetY += dy * targetY;
+  }
+  const double determinant = xx * yy - xy * xy;
+  if (xx <= 0 || yy <= 0 ||
+      determinant <= 1e-6 * xx * yy) {
+    return false;
+  }
+
+  fit.xRawX = (yy * xTargetX - xy * yTargetX) / determinant;
+  fit.xRawY = (xx * yTargetX - xy * xTargetX) / determinant;
+  fit.xOffset = DISPLAY_WIDTH / 2.0 -
+                fit.xRawX * meanX - fit.xRawY * meanY;
+  fit.yRawX = (yy * xTargetY - xy * yTargetY) / determinant;
+  fit.yRawY = (xx * yTargetY - xy * xTargetY) / determinant;
+  fit.yOffset = DISPLAY_HEIGHT / 2.0 -
+                fit.yRawX * meanX - fit.yRawY * meanY;
+  fit.valid = isfinite(fit.xRawX) && isfinite(fit.xRawY) &&
+              isfinite(fit.xOffset) && isfinite(fit.yRawX) &&
+              isfinite(fit.yRawY) && isfinite(fit.yOffset);
+  return fit.valid;
+}
+
 // Draw one calibration target and wait for the user to touch its center.
 void drawCalibrationTarget(uint8_t index) {
-  const int16_t targetX[] = {20, DISPLAY_WIDTH - 21, 20, DISPLAY_WIDTH - 21};
-  const int16_t targetY[] = {20, 20, DISPLAY_HEIGHT - 21, DISPLAY_HEIGHT - 21};
   display.fillScreen(backgroundColor);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(primaryTextColor(), backgroundColor);
-  display.drawString("Touch calibration", 24, 72, 2);
-  display.drawString("Touch target " + String(index + 1) + "/4", 24, 101,
+  display.drawString("Touch calibration", 24, 4, 2);
+  display.drawString(
+      "Touch target " + String(index + 1) + "/" +
+          String(TOUCH_CALIBRATION_TARGET_COUNT),
+      24, 22,
                      2);
-  display.drawCircle(targetX[index], targetY[index], 13, TFT_CYAN);
-  display.drawFastHLine(targetX[index] - 18, targetY[index], 37, TFT_CYAN);
-  display.drawFastVLine(targetX[index], targetY[index] - 18, 37, TFT_CYAN);
+  const int16_t targetX = TOUCH_CALIBRATION_X[index];
+  const int16_t targetY = TOUCH_CALIBRATION_Y[index];
+  display.drawCircle(targetX, targetY, 13, TFT_CYAN);
+  display.drawFastHLine(targetX - 18, targetY, 37, TFT_CYAN);
+  display.drawFastVLine(targetX, targetY - 18, 37, TFT_CYAN);
 }
 
 bool touchscreenTouched() {
@@ -1564,13 +1672,11 @@ void calibrateTouchscreen() {
     setStatus("Could not save touch calibration");
   }
 #else
-  const int16_t targetX[] = {20, DISPLAY_WIDTH - 21, 20, DISPLAY_WIDTH - 21};
-  const int16_t targetY[] = {20, 20, DISPLAY_HEIGHT - 21, DISPLAY_HEIGHT - 21};
-
   for (;;) {
-    uint16_t measuredX[4]{};
-    uint16_t measuredY[4]{};
-    for (uint8_t target = 0; target < 4; ++target) {
+    uint16_t measuredX[TOUCH_CALIBRATION_TARGET_COUNT]{};
+    uint16_t measuredY[TOUCH_CALIBRATION_TARGET_COUNT]{};
+    for (uint8_t target = 0; target < TOUCH_CALIBRATION_TARGET_COUNT;
+         ++target) {
       drawCalibrationTarget(target);
       waitForTouchRelease();
       while (!touchscreenTouched()) {
@@ -1579,6 +1685,17 @@ void calibrateTouchscreen() {
       uint32_t sumX = 0;
       uint32_t sumY = 0;
       uint8_t samples = 0;
+      for (uint8_t sample = 0; sample < 8; ++sample) {
+        if (touchscreenTouched()) {
+          uint16_t rawX = 0;
+          uint16_t rawY = 0;
+          readRawTouch(rawX, rawY);
+          sumX += rawX;
+          sumY += rawY;
+          ++samples;
+        }
+        delay(8);
+      }
       while (samples == 0) {
         while (!touchscreenTouched()) {
           delay(10);
@@ -1600,17 +1717,7 @@ void calibrateTouchscreen() {
       waitForTouchRelease();
     }
 
-    touchCalibration.xLeft = (measuredX[0] + measuredX[2]) / 2;
-    touchCalibration.xRight = (measuredX[1] + measuredX[3]) / 2;
-    touchCalibration.yTop = (measuredY[0] + measuredY[1]) / 2;
-    touchCalibration.yBottom = (measuredY[2] + measuredY[3]) / 2;
-
-    const bool valid =
-        abs(static_cast<int>(touchCalibration.xRight) -
-            touchCalibration.xLeft) >= 500 &&
-        abs(static_cast<int>(touchCalibration.yBottom) -
-            touchCalibration.yTop) >= 500;
-    if (valid) {
+    if (fitTouchCalibration(measuredX, measuredY, touchCalibration)) {
       break;
     }
 
@@ -1623,26 +1730,19 @@ void calibrateTouchscreen() {
   }
 
   const bool saved =
-      preferences.putUShort("xLeft", touchCalibration.xLeft) > 0 &&
-      preferences.putUShort("xRight", touchCalibration.xRight) > 0 &&
-      preferences.putUShort("yTop", touchCalibration.yTop) > 0 &&
-      preferences.putUShort("yBottom", touchCalibration.yBottom) > 0;
+      preferences.putFloat("touchXx", touchCalibration.xRawX) > 0 &&
+      preferences.putFloat("touchXy", touchCalibration.xRawY) > 0 &&
+      preferences.putFloat("touchXo", touchCalibration.xOffset) > 0 &&
+      preferences.putFloat("touchYx", touchCalibration.yRawX) > 0 &&
+      preferences.putFloat("touchYy", touchCalibration.yRawY) > 0 &&
+      preferences.putFloat("touchYo", touchCalibration.yOffset) > 0 &&
+      preferences.putUChar("touchVer", TOUCH_CALIBRATION_VERSION) > 0;
   if (!saved) {
     Serial.println("ERROR: could not save touchscreen calibration.");
+  } else {
+    touchCalibration.valid = true;
   }
 #endif
-}
-
-// Map a raw touch reading to display coordinates, clamping out-of-range input.
-int16_t mapTouchCoordinate(uint16_t raw, uint16_t start, uint16_t end,
-                           int16_t screenSize) {
-  if (start == end) {
-    return 0;
-  }
-  const int32_t mapped =
-      (static_cast<int32_t>(raw) - start) * (screenSize - 1) /
-      (static_cast<int32_t>(end) - start);
-  return constrain(mapped, 0, screenSize - 1);
 }
 
 bool readTouchPoint(int16_t &x, int16_t &y) {
@@ -1698,10 +1798,16 @@ bool readTouchPoint(int16_t &x, int16_t &y) {
   if (samples == 0) {
     return false;
   }
-  x = mapTouchCoordinate(sumX / samples, touchCalibration.xLeft,
-                         touchCalibration.xRight, display.width());
-  y = mapTouchCoordinate(sumY / samples, touchCalibration.yTop,
-                         touchCalibration.yBottom, display.height());
+  const float rawX = sumX / static_cast<float>(samples);
+  const float rawY = sumY / static_cast<float>(samples);
+  const int32_t mappedX = lroundf(touchCalibration.xRawX * rawX +
+                                  touchCalibration.xRawY * rawY +
+                                  touchCalibration.xOffset);
+  const int32_t mappedY = lroundf(touchCalibration.yRawX * rawX +
+                                  touchCalibration.yRawY * rawY +
+                                  touchCalibration.yOffset);
+  x = constrain(mappedX, 0, display.width() - 1);
+  y = constrain(mappedY, 0, display.height() - 1);
   return true;
 #endif
 }
@@ -2146,10 +2252,10 @@ void appendKeyboardCharacter(char value) {
 
 // Map keyboard touches to characters, mode changes, deletion, and actions.
 void handleKeyboardTouch(int16_t x, int16_t y) {
-  const int16_t showWidth = wideKeyboardLayout() ? 54 : 48;
+  const int16_t showWidth = wideKeyboardLayout() ? 70 : 62;
   if (keyboardTarget == KeyboardTarget::Password &&
-      pointInRect(x, y, UI_LEFT + UI_WIDTH - showWidth, 36, showWidth,
-                  wideKeyboardLayout() ? 22 : 19)) {
+      pointInRect(x, y, UI_LEFT + UI_WIDTH - showWidth - 8, 26,
+                  showWidth + 16, 44)) {
     showWifiPassword = !showWifiPassword;
     markUiDirty();
     return;
@@ -2179,8 +2285,8 @@ void handleKeyboardTouch(int16_t x, int16_t y) {
     }
   }
 
-  const int16_t controlY = wideKeyboardLayout() ? 180 : 156;
-  const int16_t controlHeight = wideKeyboardLayout() ? 26 : 24;
+  const int16_t controlY = wideKeyboardLayout() ? 177 : 156;
+  const int16_t controlHeight = wideKeyboardLayout() ? 28 : 24;
   int16_t controlX = 0;
   int16_t controlWidth = 0;
   keyboardControlBounds(0, controlX, controlWidth);
@@ -2211,7 +2317,7 @@ void handleKeyboardTouch(int16_t x, int16_t y) {
   }
 
   const int16_t actionY = wideKeyboardLayout() ? 211 : 192;
-  const int16_t actionHeight = wideKeyboardLayout() ? 24 : 31;
+  const int16_t actionHeight = wideKeyboardLayout() ? 25 : 31;
   const int16_t actionWidth = wideKeyboardLayout() ? (UI_WIDTH - 8) / 2 : 98;
   const int16_t actionGap = 8;
   if (pointInRect(x, y, UI_LEFT, actionY, actionWidth, actionHeight)) {
@@ -2329,6 +2435,7 @@ void handleHomeTouch(int16_t x, int16_t y) {
   } else if (pointInRect(x, y, UI_LEFT, 190, 99, 36)) {
     currentScreen = Screen::Stations;
     deleteConfirmation = false;
+    stationListFromSettings = false;
   } else if (pointInRect(x, y, UI_LEFT + 105, 190, 105, 36)) {
     currentScreen = Screen::Settings;
   }
@@ -2338,9 +2445,9 @@ void handleHomeTouch(int16_t x, int16_t y) {
 // Handle station selection, paging, editing, deletion, and list navigation.
 void handleStationTouch(int16_t x, int16_t y) {
   if (deleteConfirmation) {
-    if (pointInRect(x, y, UI_LEFT + 14, 136, 127, 25)) {
+    if (pointInRect(x, y, UI_LEFT + 14, 136, 127, 28)) {
       deleteConfirmation = false;
-    } else if (pointInRect(x, y, UI_LEFT + 147, 136, 127, 25)) {
+    } else if (pointInRect(x, y, UI_LEFT + 147, 136, 127, 28)) {
       deleteStation(deleteIndex);
     }
     markUiDirty();
@@ -2350,41 +2457,41 @@ void handleStationTouch(int16_t x, int16_t y) {
   const uint8_t pageStart = stationListPage * STATIONS_PER_PAGE;
   const uint8_t visibleStations =
       min<uint8_t>(STATIONS_PER_PAGE, stationCount - pageStart);
-  if (y >= 41 && y < 41 + visibleStations * 27) {
-    const uint8_t row = (y - 41) / 27;
+  if (pointOnMenuBackButton(x, y)) {
+    currentScreen = stationListFromSettings ? Screen::Settings : Screen::Home;
+  } else if (y >= 44 && y < 44 + visibleStations * 36) {
+    const uint8_t row = (y - 44) / 36;
     const uint8_t index = stationListPage * STATIONS_PER_PAGE + row;
-    if (row < STATIONS_PER_PAGE && index < stationCount) {
-      if (x >= UI_LEFT + UI_WIDTH - 30) {
+    const int16_t rowY = 44 + row * 36;
+    if (row < STATIONS_PER_PAGE && index < stationCount &&
+        pointInRect(x, y, UI_LEFT, rowY, UI_WIDTH, 32)) {
+      if (x >= UI_LEFT + 242 && x < UI_LEFT + 296) {
         deleteIndex = index;
         deleteConfirmation = true;
-      } else if (x >= UI_LEFT + UI_WIDTH - 60) {
+      } else if (x >= UI_LEFT + 184 && x < UI_LEFT + 236) {
         startStationEditor(false, index);
         return;
-      } else {
+      } else if (x >= UI_LEFT && x < UI_LEFT + 178) {
         selectStation(index);
         return;
       }
     }
   } else {
-    const int16_t controlsWidth = 36 + 4 + 36 + 4 + 52 + 4 + 100 + 4 + 52;
-    const int16_t controlsLeft = UI_LEFT + (UI_WIDTH - controlsWidth) / 2;
-    if (pointInRect(x, y, controlsLeft, 204, 36, 25)) {
+    if (pointInRect(x, y, UI_LEFT, 197, 40, 36)) {
       if (stationListPage > 0) {
         --stationListPage;
       }
-    } else if (pointInRect(x, y, controlsLeft + 40, 204, 36, 25)) {
+    } else if (pointInRect(x, y, UI_LEFT + 46, 197, 40, 36)) {
       if (stationListPage + 1 < stationPageCount()) {
         ++stationListPage;
       }
-    } else if (pointInRect(x, y, controlsLeft + 132, 204, 100, 25)) {
+    } else if (pointInRect(x, y, UI_LEFT + 164, 197, 132, 36)) {
       if (stationCount >= MAX_STATIONS) {
         setStatus("Station list is full");
       } else {
         startStationEditor(true, stationCount);
         return;
       }
-    } else if (pointInRect(x, y, controlsLeft + 236, 204, 52, 25)) {
-      currentScreen = Screen::Home;
     }
   }
   markUiDirty();
@@ -2420,64 +2527,88 @@ void handleTouch(int16_t x, int16_t y) {
       break;
     case Screen::Settings:
     {
-      const int16_t toggleWidth = (UI_WIDTH - 6) / 2;
-#if defined(BOARD_FREENOVE_FNK0114L)
-      if (pointInRect(x, y, UI_LEFT + UI_WIDTH - 116, 4, 62, 23)) {
-        currentScreen = Screen::RgbLedSettings;
-        markUiDirty();
-        break;
-      }
-#endif
-      if (pointInRect(x, y, UI_LEFT + UI_WIDTH - 48, 4, 48, 23)) {
+      if (pointOnMenuBackButton(x, y)) {
         currentScreen = Screen::Home;
-      } else if (pointInRect(x, y, UI_LEFT, 36, toggleWidth, 25)) {
-        currentScreen = Screen::Wifi;
-      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 36,
-                             toggleWidth, 25)) {
-        currentScreen = Screen::Stations;
-        deleteConfirmation = false;
-      } else if (pointInRect(x, y, UI_LEFT, 63, toggleWidth, 24)) {
+      } else if (x >= UI_LEFT && x < UI_LEFT + UI_WIDTH &&
+                 y >= SETTINGS_ITEM_START_Y) {
+        const int16_t rowStep = SETTINGS_ITEM_HEIGHT + SETTINGS_ITEM_GAP;
+        const uint8_t row =
+            static_cast<uint8_t>((y - SETTINGS_ITEM_START_Y) / rowStep);
+        const int16_t rowY = SETTINGS_ITEM_START_Y + row * rowStep;
+        if (pointInRect(x, y, UI_LEFT, rowY, UI_WIDTH,
+                        SETTINGS_ITEM_HEIGHT)) {
+          switch (row) {
+            case 0:
+              currentScreen = Screen::AudioSettings;
+              break;
+            case 1:
+              currentScreen = Screen::DisplaySettings;
+              break;
+            case 2:
+              currentScreen = Screen::Wifi;
+              break;
+            case 3:
+              currentScreen = Screen::Stations;
+              deleteConfirmation = false;
+              stationListFromSettings = true;
+              break;
+#if defined(BOARD_FREENOVE_FNK0114L)
+            case 4:
+              currentScreen = Screen::RgbLedSettings;
+              break;
+#endif
+          }
+        }
+      }
+      markUiDirty();
+      break;
+    }
+    case Screen::AudioSettings:
+      if (pointOnMenuBackButton(x, y)) {
+        currentScreen = Screen::Settings;
+      } else if (pointInRect(x, y, UI_LEFT, 37, UI_WIDTH, 29)) {
         setAudioBoost(!audioBoost);
-      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 63,
-                             toggleWidth, 24)) {
+      } else if (pointInRect(x, y, UI_LEFT, 69, UI_WIDTH, 29)) {
         setAudioSpectrum(!audioSpectrumEnabled);
-      } else if (pointInRect(x, y, UI_LEFT, 90, toggleWidth, 24)) {
+      } else if (pointInRect(x, y, UI_LEFT, 101, UI_WIDTH, 29)) {
         setAudioCompressor(!audioCompressorEnabled);
-      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 90,
-                             toggleWidth, 24)) {
+      } else if (pointInRect(x, y, UI_LEFT, 133, UI_WIDTH, 29)) {
         setAudioAmpEnabled(!audioAmpEnabled);
-      } else if (pointInRect(x, y, UI_LEFT, 117, toggleWidth, 22)) {
-        calibrateTouchscreen();
-      } else if (pointInRect(x, y, UI_LEFT + toggleWidth + 6, 117,
-                             toggleWidth, 22)) {
+      } else if (pointInRect(x, y, UI_LEFT, 165, UI_WIDTH, 29)) {
         setAudioNoiseShaping(!audioNoiseShaping);
-      } else if (pointInRect(x, y, UI_LEFT, 187, UI_WIDTH,
-                             themeSwatchHeight + 2)) {
+      } else if (pointInRect(x, y, UI_LEFT, 190, UI_WIDTH, 50)) {
+        adjustVolumeFromTouch(x);
+      }
+      markUiDirty();
+      break;
+    case Screen::DisplaySettings: {
+      if (pointOnMenuBackButton(x, y)) {
+        currentScreen = Screen::Settings;
+      } else if (pointInRect(x, y, UI_LEFT, 61, UI_WIDTH, 34)) {
         for (uint8_t index = 0; index < THEME_COLOR_COUNT; ++index) {
-          if (pointInRect(x, y, themeSwatchX(index) - 1, 187,
-                          themeSwatchWidth + 2, themeSwatchHeight + 2)) {
+          if (pointInRect(x, y, themeSwatchX(index) - 2, 60,
+                          themeSwatchWidth + 4, 34)) {
             setThemeColor(index);
             break;
           }
         }
-      } else if (pointInRect(x, y, UI_LEFT, 215, UI_WIDTH,
-                             themeSwatchHeight + 2)) {
+      } else if (pointInRect(x, y, UI_LEFT, 130, UI_WIDTH, 34)) {
         for (uint8_t index = 0; index < BUTTON_COLOR_COUNT; ++index) {
-          if (pointInRect(x, y, themeSwatchX(index) - 1, 215,
-                          themeSwatchWidth + 2, themeSwatchHeight + 2)) {
+          if (pointInRect(x, y, themeSwatchX(index) - 2, 129,
+                          themeSwatchWidth + 4, 34)) {
             setButtonColor(index);
             break;
           }
         }
-      } else if (pointInRect(x, y, UI_LEFT, 159, UI_WIDTH, 18)) {
-        adjustVolumeFromTouch(x);
+      } else if (pointInRect(x, y, UI_LEFT, 184, UI_WIDTH, 42)) {
+        calibrateTouchscreen();
       }
       markUiDirty();
       break;
     }
 #if defined(BOARD_FREENOVE_FNK0114L)
     case Screen::RgbLedSettings: {
-      if (pointInRect(x, y, UI_LEFT + UI_WIDTH - 48, 4, 48, 23)) {
+      if (pointOnMenuBackButton(x, y)) {
         currentScreen = Screen::Settings;
       } else if (pointInRect(x, y, UI_LEFT, 48, UI_WIDTH, 32)) {
         setRgbLedEnabled(!rgbLedEnabled);
@@ -2505,18 +2636,18 @@ void handleTouch(int16_t x, int16_t y) {
     }
 #endif
     case Screen::Wifi:
-      if (pointInRect(x, y, UI_LEFT, 54, UI_WIDTH, 34)) {
+      if (pointInRect(x, y, UI_LEFT, 55, UI_WIDTH, 39)) {
         beginKeyboard(KeyboardTarget::Ssid);
-      } else if (pointInRect(x, y, UI_LEFT, 111, UI_WIDTH, 34)) {
+      } else if (pointInRect(x, y, UI_LEFT, 118, UI_WIDTH, 39)) {
         beginKeyboard(KeyboardTarget::Password);
-      } else if (pointInRect(x, y, UI_LEFT, 151, UI_WIDTH, 18)) {
+      } else if (pointInRect(x, y, UI_LEFT, 157, UI_WIDTH, 38)) {
         showWifiPassword = !showWifiPassword;
         markUiDirty();
-      } else if (pointInRect(x, y, UI_LEFT, 176, (UI_WIDTH - 8) / 2, 32)) {
+      } else if (pointInRect(x, y, UI_LEFT, 198, (UI_WIDTH - 8) / 2, 32)) {
         if (saveWifiCredentials()) {
           beginWifiConnection();
         }
-      } else if (pointInRect(x, y, UI_LEFT + (UI_WIDTH - 8) / 2 + 8, 176,
+      } else if (pointInRect(x, y, UI_LEFT + (UI_WIDTH - 8) / 2 + 8, 198,
                              (UI_WIDTH - 8) / 2, 32)) {
         currentScreen = Screen::Settings;
         markUiDirty();
@@ -2526,14 +2657,14 @@ void handleTouch(int16_t x, int16_t y) {
       handleStationTouch(x, y);
       break;
     case Screen::StationEditor:
-      if (pointInRect(x, y, UI_LEFT, 54, UI_WIDTH, 32)) {
+      if (pointInRect(x, y, UI_LEFT, 57, UI_WIDTH, 39)) {
         beginKeyboard(KeyboardTarget::StationName);
-      } else if (pointInRect(x, y, UI_LEFT, 108, UI_WIDTH, 32)) {
+      } else if (pointInRect(x, y, UI_LEFT, 122, UI_WIDTH, 39)) {
         beginKeyboard(KeyboardTarget::StationUrl);
-      } else if (pointInRect(x, y, UI_LEFT, 159, (UI_WIDTH - 8) / 2, 36)) {
+      } else if (pointInRect(x, y, UI_LEFT, 181, (UI_WIDTH - 8) / 2, 40)) {
         saveStationEditor();
-      } else if (pointInRect(x, y, UI_LEFT + (UI_WIDTH - 8) / 2 + 8, 159,
-                             (UI_WIDTH - 8) / 2, 36)) {
+      } else if (pointInRect(x, y, UI_LEFT + (UI_WIDTH - 8) / 2 + 8, 181,
+                             (UI_WIDTH - 8) / 2, 40)) {
         currentScreen = Screen::Stations;
         markUiDirty();
       }
@@ -2663,15 +2794,29 @@ void setup() {
     display.setTouch(freenoveTouchCalibration);
   }
 #else
-  touchCalibration.xLeft = preferences.getUShort("xLeft", 0);
-  touchCalibration.xRight = preferences.getUShort("xRight", 0);
-  touchCalibration.yTop = preferences.getUShort("yTop", 0);
-  touchCalibration.yBottom = preferences.getUShort("yBottom", 0);
-  if (abs(static_cast<int>(touchCalibration.xRight) -
-          touchCalibration.xLeft) < 500 ||
-      abs(static_cast<int>(touchCalibration.yBottom) -
-          touchCalibration.yTop) < 500) {
+  if (preferences.getUChar("touchVer", 0) == TOUCH_CALIBRATION_VERSION) {
+    touchCalibration.xRawX = preferences.getFloat("touchXx", 0);
+    touchCalibration.xRawY = preferences.getFloat("touchXy", 0);
+    touchCalibration.xOffset = preferences.getFloat("touchXo", 0);
+    touchCalibration.yRawX = preferences.getFloat("touchYx", 0);
+    touchCalibration.yRawY = preferences.getFloat("touchYy", 0);
+    touchCalibration.yOffset = preferences.getFloat("touchYo", 0);
+    touchCalibration.valid =
+        isfinite(touchCalibration.xRawX) &&
+        isfinite(touchCalibration.xRawY) &&
+        isfinite(touchCalibration.xOffset) &&
+        isfinite(touchCalibration.yRawX) &&
+        isfinite(touchCalibration.yRawY) &&
+        isfinite(touchCalibration.yOffset) &&
+        (fabsf(touchCalibration.xRawX) +
+         fabsf(touchCalibration.xRawY) > 1e-6f) &&
+        (fabsf(touchCalibration.yRawX) +
+         fabsf(touchCalibration.yRawY) > 1e-6f);
+  }
+  if (!touchCalibration.valid) {
     calibrateTouchscreen();
+  } else {
+    Serial.println("Touchscreen calibration loaded.");
   }
 #endif
 
@@ -2748,17 +2893,25 @@ void loop() {
       markUiDirty();
     }
   }
-  if (currentScreen == Screen::Home &&
-      now - lastCatFrameAt >= CAT_FRAME_INTERVAL_MS) {
-    lastCatFrameAt = now;
-    if (uiDirty) {
+#if defined(DIAGNOSTIC_NO_DISPLAY_DURING_AUDIO)
+  const bool freezeDisplayForAudioTest =
+      currentScreen == Screen::Home && streamActive;
+  if (!freezeDisplayForAudioTest) {
+#endif
+    if (currentScreen == Screen::Home &&
+        now - lastCatFrameAt >= CAT_FRAME_INTERVAL_MS) {
+      lastCatFrameAt = now;
+      if (uiDirty) {
+        renderScreen();
+      } else {
+        drawCatFrame(now);
+      }
+    } else if (uiDirty) {
       renderScreen();
-    } else {
-      drawCatFrame(now);
     }
-  } else if (uiDirty) {
-    renderScreen();
+#if defined(DIAGNOSTIC_NO_DISPLAY_DURING_AUDIO)
   }
+#endif
   if (audioDirty) {
     audioDirty = false;
     markUiDirty();

@@ -72,7 +72,7 @@
   <body>
     <main>
       <h1>CYD PET Radio</h1>
-      <p>Install CYD PET Radio directly from your browser. Firmware is available for both supported boards; choose the option that matches your display:</p>
+      <p>Install CYD PET Radio directly from your browser. Choose the option that matches your board and display:</p>
       <img class="radio-image" src="./CYD-PET-Radio.png" alt="CYD PET Radio running on the CYD display">
       <ol>
         <li>Use Chrome, Edge, or another desktop browser that supports Web Serial.</li>
@@ -80,15 +80,20 @@
         <li>Select the matching board below, then choose its serial port and confirm.</li>
       </ol>
       <p class="warning">
-        Select the firmware for your exact board. The display and touch
-        configurations differ, so the two firmware images are not
-        interchangeable.
+        Select the firmware for your exact board and display controller.
+        Display controllers and some board-specific pin configurations differ,
+        so the firmware images are not interchangeable.
       </p>
       <h2>Supported boards</h2>
-      <h2>ESP32 CYD 2.8″</h2>
+      <h2>CYD 2.8″ ST7789</h2>
       <p>2.8-inch, 240 × 320 ST7789 display with resistive XPT2046 touch.</p>
       <p class="install">
         <esp-web-install-button manifest="./manifest.json"></esp-web-install-button>
+      </p>
+      <h2>CYD 2.8″ ILI9341 (ESP32-2432S028R)</h2>
+      <p>2.8-inch, 240 × 320 ILI9341 display with resistive XPT2046 touch.</p>
+      <p class="install">
+        <esp-web-install-button manifest="./manifest-cyd-ili9341.json"></esp-web-install-button>
       </p>
       <h2>Freenove FNK0114L 3.2″</h2>
       <p>3.2-inch, 240 × 320 ST7789 display with resistive XPT2046 touch.</p>

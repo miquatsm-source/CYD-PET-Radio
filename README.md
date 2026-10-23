@@ -15,17 +15,18 @@ on the decoded audio samples.
 
 ## Hardware configuration
 
-The firmware supports both boards. Choose the matching firmware in PlatformIO
-or the web flasher; the images use different display and touch pin
-configurations and are not interchangeable.
+The firmware supports the CYD and Freenove boards, including two CYD display
+variants. Choose the matching firmware in PlatformIO or the web flasher; the
+display controllers and some board-specific pin configurations differ, so
+the firmware images are not interchangeable.
 
-| Feature | ESP32 CYD 2.8″ | Freenove FNK0114L 3.2″ |
-|---------|----------------|------------------------|
-| Display | ST7789, 240 × 320 | ST7789, 240 × 320 |
-| Touch | Resistive XPT2046, dedicated SPI bus | Resistive XPT2046, shared HSPI bus |
-| Backlight | GPIO 21 | GPIO 27 |
-| PlatformIO environment | `esp32dev` (40 MHz) or `esp32dev-fast` (80 MHz) | `fnk0114l` (80 MHz) |
-| Display setup | `include/cyd_user_setup.h` | `include/freenove_fnk0114l_setup.h` |
+| Feature | CYD 2.8″ ST7789 | CYD 2.8″ ILI9341 (ESP32-2432S028R) | Freenove FNK0114L 3.2″ |
+|---------|----------------|-----------------------------------|------------------------|
+| Display | ST7789, 240 × 320 | ILI9341, 240 × 320 | ST7789, 240 × 320 |
+| Touch | Resistive XPT2046, dedicated SPI bus | Resistive XPT2046, dedicated SPI bus | Resistive XPT2046, shared HSPI bus |
+| Backlight | GPIO 21 | GPIO 21 | GPIO 27 |
+| PlatformIO environment | `esp32dev` (40 MHz) or `esp32dev-fast` (80 MHz) | `esp32dev-ili9341` (40 MHz) | `fnk0114l` (80 MHz) |
+| Display setup | `include/cyd_user_setup.h` | `include/cyd_ili9341_setup.h` | `include/freenove_fnk0114l_setup.h` |
 
 Both boards use the ESP32's built-in DAC on GPIO 26 for mono speaker output.
 Wi-Fi credentials and the station list are saved in each board's non-volatile
@@ -36,15 +37,17 @@ enable it, choose one of five colors, and optionally turn on slow pulsing.
 These controls are available only in the FNK0114L firmware; the CYD's rear LED
 hardware and pin assignments are not confirmed as compatible.
 
-The `esp32dev-fast` environment uses an overclock and may be unstable on some
-CYD boards. Use `esp32dev` if the display shows artifacts.
+The `esp32dev-fast` environment uses an 80 MHz SPI clock and may be unstable
+on some CYD boards. Use `esp32dev` if the ST7789 display shows artifacts.
 
 ## Radio controls
 
-On first boot, touch the four calibration targets. To repeat the calibration
-later, open **MENU** and tap **RECALIBRATE TOUCHSCREEN**. Open **MENU > WI-FI** to
-enter the Wi-Fi network name and password with the touchscreen keyboard, then
-tap **CONNECT**. The radio starts its selected station once Wi-Fi connects.
+On first boot, touch the calibration targets that appear (five points on CYD
+boards). To repeat the calibration later, open **MENU > DISPLAY & TOUCH** and
+tap **RECALIBRATE TOUCHSCREEN**.
+Open **MENU > WI-FI** to enter the Wi-Fi network name and password with the
+touchscreen keyboard, then tap **CONNECT**. The radio starts its selected
+station once Wi-Fi connects.
 The home screen provides station navigation, play/pause, and a touchscreen
 volume slider. The top-right corner shows the current Europe/Berlin time and
 date. Wi-Fi status and signal strength appear to the left of the **PET RADIO**
@@ -66,34 +69,34 @@ On the FNK0114L, the rear RGB LED (when enabled in the RGB LED settings) pulses
 faster as the timer approaches zero. The CYD has no confirmed compatible rear
 RGB LED, so timer lighting is disabled there.
 
-Choose one of five dark background colors in **MENU**. The selection is saved
-across restarts, and interface text remains white for readability.
-The **BUTTONS** swatches in the same menu independently choose the button fill:
-charcoal, deep blue, teal, plum, or bronze. These muted dark colors keep white
-labels readable on both supported displays. The choice applies to play/pause
-and all toggle buttons, regardless of whether a toggle is on or off, and is
-saved across restarts. The volume slider track uses the selected button color
-as well.
+Choose one of five dark background colors in **MENU > DISPLAY & TOUCH**. The
+selection is saved across restarts, and interface text remains white for
+readability. The **BUTTONS** swatches on the same page independently choose
+the button fill: charcoal, deep blue, teal, plum, or bronze. These muted dark
+colors keep white labels readable on both supported displays. The choice
+applies to play/pause and all toggle buttons, regardless of whether a toggle
+is on or off, and is saved across restarts. The volume slider track uses the
+selected button color as well.
 
-Enable optional dynamic audio compression in **MENU** to boost quieter audio
-while controlling loud peaks. This can make streaming volume more consistent,
-but does not increase the CYD's physical amplifier output.
+Enable optional dynamic audio compression in **MENU > AUDIO** to boost quieter
+audio while controlling loud peaks. This can make streaming volume more
+consistent, but does not increase the CYD's physical amplifier output.
 
-If playback is too quiet at 100%, open **MENU** and enable **AUDIO BOOST
-+6 dB**. This applies digital equalizer gain and is saved across restarts.
-Boost can cause distortion on loud audio; switch it off if playback clips.
-The regular volume control still sets the decoder level independently.
+If playback is too quiet at 100%, open **MENU > AUDIO** and enable **AUDIO
+BOOST +6 dB**. This applies digital equalizer gain and is saved across
+restarts. Boost can cause distortion on loud audio; switch it off if playback
+clips. The regular volume control still sets the decoder level independently.
 
-The **GPIO4 AMP** option in **MENU** defaults to off. When enabled, it drives
-GPIO 4 low; when disabled, it drives GPIO 4 high. Use this only with a CYD
-board revision whose speaker-amplifier enable is wired to GPIO 4, since pin
-assignments can differ between board revisions.
+The **GPIO4 AMP** option in **MENU > AUDIO** defaults to off. When enabled, it
+drives GPIO 4 low; when disabled, it drives GPIO 4 high. Use this only with a
+CYD board revision whose speaker-amplifier enable is wired to GPIO 4, since
+pin assignments can differ between board revisions.
 
 The built-in DAC has only 8 bits, which causes audible hiss. Enable **NOISE
-SHAPE** in **MENU** to shift the quantization noise to higher frequencies where
-it is less audible. At each stream start, audio stays muted until the first
-non-silent decoded sample, remains muted for one second, and then fades in over
-750 ms to reduce clicks when switching stations.
+SHAPING** in **MENU > AUDIO** to shift the quantization noise to higher
+frequencies where it is less audible. At each stream start, audio stays muted
+until the first non-silent decoded sample, remains muted for one second, and
+then fades in over 750 ms to reduce clicks when switching stations.
 
 The Wi-Fi connection scans every 2.4 GHz channel and reports whether the SSID
 was not found or WPA2 authentication failed. If the connection still fails,
@@ -103,7 +106,7 @@ passphrases must contain 8–63 characters. If the connection stays down for 30
 seconds, the radio automatically reconnects and restarts the stream, and keeps
 retrying every 30 seconds until Wi-Fi is available again.
 
-Open **STATIONS** or **MENU > STATION LIST** to play a station, edit its name or
+Open **STATIONS** or **MENU > STATIONS** to play a station, edit its name or
 stream URL, add a station, or remove one. The list is paginated and supports up
 to 15 stations. On a fresh setup, `src/playlist.csv` supplies the default
 playlist at build time. It is tab-separated with station name and HTTP(S)
@@ -183,9 +186,9 @@ settings, and cat animation are implemented for this CYD project.
 ## Install from a browser
 
 After enabling GitHub Pages for this repository with **Settings > Pages >
-Build and deployment > GitHub Actions**, choose the matching CYD or Freenove
-button on the [web flasher](https://tsm-source.github.io/CYD-PET-Radio/).
-Every push to `main` builds both firmware variants and deploys the flasher
+Build and deployment > GitHub Actions**, choose the matching board button on
+the [web flasher](https://tsm-source.github.io/CYD-PET-Radio/). Every push to
+`main` builds the three firmware variants and deploys the flasher
 automatically.
 
 Use a desktop browser that supports Web Serial, such as Chrome or Edge, and a
@@ -202,9 +205,34 @@ or run:
 ```sh
 pio run -e esp32dev-fast
 pio run -e esp32dev-fast -t upload
+pio run -e esp32dev-ili9341
+pio run -e esp32dev-ili9341 -t upload
 pio run -e fnk0114l
 pio run -e fnk0114l -t upload
 ```
+
+### Diagnose audio stutter on the ILI9341 CYD
+
+To test whether display refreshes are interrupting audio processing, flash a
+temporary build that freezes the home screen while a stream is active:
+
+```sh
+pio run -e esp32dev-ili9341-audio-test -t upload --upload-port COM9
+```
+
+Leave the radio on its home screen during the test. The firmware keeps playing
+audio but does not redraw that screen until the stream stops. To return to the
+normal ILI9341 firmware, upload its separate, unchanged environment:
+
+```sh
+pio run -e esp32dev-ili9341 -t upload --upload-port COM9
+```
+
+Neither upload requires erasing the board, so saved Wi-Fi credentials,
+stations, volume, and touch calibration are preserved. If audio stutters only
+with the normal firmware, display refresh work is implicated; if it also
+stutters with the frozen display, investigate the board's audio hardware or
+stream path instead.
 
 The volume, Wi-Fi credentials, touchscreen calibration, and station list are
 stored on each board and persist across reboots.
